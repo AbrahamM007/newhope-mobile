@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,225 +8,229 @@ import {
   RefreshControl,
   Image,
   Dimensions,
-  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/context/AuthContext';
-import { eventsAPI, servicesAPI } from '@/lib/api';
-import { Calendar, Users, Heart, Gift, Play, BookOpen, Bell, ArrowRight, ChevronRight, MapPin } from 'lucide-react-native';
+import { eventsAPI, servicesAPI, servingAPI } from '@/lib/api';
 import { useRouter } from 'expo-router';
 import theme from '@/lib/theme';
 import { StatusBar } from 'expo-status-bar';
 import { LinearGradient } from 'expo-linear-gradient';
-import { BlurView } from 'expo-blur';
+import {
+  HandHeart,
+  Heart,
+  Calendar,
+  Search,
+  MapPin,
+  Play,
+  Clock,
+  ChevronRight,
+  Check,
+  X,
+  Radio,
+} from 'lucide-react-native';
 
 const { width } = Dimensions.get('window');
+
+const MOCK_ANNOUNCEMENTS = [
+  { id: '1', title: 'Easter Services Schedule', content: 'Join us for our special Easter celebration services...', category: 'church_wide' },
+  { id: '2', title: 'Youth Camp Registration Open', content: 'Register your teens for summer camp...', category: 'ministry' },
+  { id: '3', title: 'New Volunteer Orientation', content: 'Interested in serving? Join our orientation...', category: 'volunteers' },
+];
+
+const MOCK_EVENTS = [
+  { id: '1', title: 'Worship Night', start_time: '2026-02-15T19:00:00', location: 'Main Campus', category: 'worship' },
+  { id: '2', title: 'Youth Rally', start_time: '2026-02-18T18:00:00', location: 'Youth Center', category: 'youth' },
+  { id: '3', title: 'Community Service Day', start_time: '2026-02-22T09:00:00', location: 'City Park', category: 'outreach' },
+];
+
+const MOCK_SERVING = { date: 'Feb 16', role: 'Acoustic Guitar', service: 'Sunday 9AM', status: 'pending' };
+
+const CATEGORY_COLORS: Record<string, string> = {
+  church_wide: '#2563EB', ministry: '#7C3AED', volunteers: theme.colors.brandGreen,
+  worship: '#EC4899', youth: '#F59E0B', outreach: '#0EA5E9',
+};
+
+const QUICK_ACTIONS = [
+  { key: 'prayer', label: 'Prayer', icon: HandHeart, color: '#7C3AED', bg: '#F3E8FF', route: '/prayer' },
+  { key: 'give', label: 'Give', icon: Heart, color: '#DC2626', bg: '#FEE2E2', route: '/give' },
+  { key: 'events', label: 'Events', icon: Calendar, color: '#D97706', bg: '#FEF3C7', route: '/events' },
+  { key: 'directory', label: 'Directory', icon: Search, color: '#2563EB', bg: '#DBEAFE', route: '/directory' },
+];
+
+function getGreeting() {
+  const h = new Date().getHours();
+  if (h < 12) return 'Good Morning';
+  if (h < 18) return 'Good Afternoon';
+  return 'Good Evening';
+}
+
+function formatEventDate(iso: string) {
+  const d = new Date(iso);
+  const month = d.toLocaleString('en-US', { month: 'short' }).toUpperCase();
+  return { month, day: d.getDate(), time: d.toLocaleString('en-US', { hour: 'numeric', minute: '2-digit' }) };
+}
 
 export default function HomeScreen() {
   const { user } = useAuth();
   const router = useRouter();
   const [refreshing, setRefreshing] = useState(false);
-  const [upcomingEvents, setUpcomingEvents] = useState<any[]>([]);
-  const [services, setServices] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [events, setEvents] = useState(MOCK_EVENTS);
+  const [serving, setServing] = useState<typeof MOCK_SERVING | null>(MOCK_SERVING);
+  const [announcements] = useState(MOCK_ANNOUNCEMENTS);
 
-  // Suggested Logic for Next Step
-  const nextStep = {
-    type: 'serve',
-    title: 'Find Your Purpose',
-    subtitle: 'Sign up for the Dream Team today.',
-    action: '/(tabs)/serve',
-  };
-
-  useEffect(() => {
-    loadHomeData();
+  const loadData = useCallback(async () => {
+    try {
+      const [evData] = await Promise.all([
+        eventsAPI.getUpcoming(3).catch(() => null),
+        servicesAPI.getAll().catch(() => null),
+        servingAPI.getMySchedule(true).catch(() => null),
+      ]);
+      if (evData?.length) setEvents(evData);
+    } catch (_) {}
   }, []);
 
-  const loadHomeData = async () => {
-    try {
-      const [eventsData, servicesData] = await Promise.all([
-        eventsAPI.getUpcoming(3).catch(() => []),
-        servicesAPI.getAll().catch(() => []),
-      ]);
-      setUpcomingEvents(eventsData || []);
-      setServices(servicesData || []);
-    } catch (error) {
-      console.error('Error loading home data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => { loadData(); }, [loadData]);
 
-  const onRefresh = async () => {
+  const onRefresh = useCallback(async () => {
     setRefreshing(true);
-    await loadHomeData();
+    await loadData();
     setRefreshing(false);
-  };
+  }, [loadData]);
 
-  const getGreeting = () => {
-    const hour = new Date().getHours();
-    if (hour < 12) return 'Good Morning';
-    if (hour < 18) return 'Good Afternoon';
-    return 'Good Evening';
-  };
+  const initials = `${user?.firstName?.charAt(0) ?? ''}${user?.lastName?.charAt(0) ?? ''}`;
 
   return (
-    <View style={styles.container}>
+    <View style={s.root}>
       <StatusBar style="dark" />
-
-      {/* Background Gradient */}
-      <LinearGradient
-        colors={[theme.colors.white, theme.colors.gray100]}
-        style={StyleSheet.absoluteFill}
-      />
-
-      <SafeAreaView edges={['top']} style={{ flex: 1 }}>
+      <SafeAreaView edges={['top']} style={s.safe}>
         <ScrollView
-          contentContainerStyle={styles.content}
+          contentContainerStyle={s.scroll}
           showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={onRefresh}
-              tintColor={theme.colors.brandGreen}
-            />
-          }
+          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.colors.brandGreen} />}
         >
-          {/* Header Section */}
-          <View style={styles.header}>
-            <View style={styles.headerTop}>
-              <View>
-                <Text style={styles.greeting}>{getGreeting()}</Text>
-                <Text style={styles.userName}>{user?.firstName || 'Friend'}</Text>
+          <View style={s.header}>
+            <View>
+              <Text style={s.greeting}>{getGreeting()}, {user?.firstName || 'Friend'}</Text>
+              <Text style={s.subtitle}>Welcome to NewHope</Text>
+            </View>
+            <TouchableOpacity onPress={() => router.push('/(tabs)/profile')} activeOpacity={0.8}>
+              {user?.avatar ? (
+                <Image source={{ uri: user.avatar }} style={s.avatar} />
+              ) : (
+                <LinearGradient colors={theme.colors.gradients.primary as [string, string]} style={s.avatar}>
+                  <Text style={s.avatarText}>{initials || '?'}</Text>
+                </LinearGradient>
+              )}
+            </TouchableOpacity>
+          </View>
+
+          <TouchableOpacity activeOpacity={0.9} style={s.serviceCardWrap}>
+            <LinearGradient colors={theme.colors.gradients.primary as [string, string]} style={s.serviceCard} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+              <Text style={s.serviceLabel}>TODAY AT NEWHOPE</Text>
+              <Text style={s.serviceTitle}>Sunday Service</Text>
+              <View style={s.serviceRow}>
+                <Clock size={14} color="rgba(255,255,255,0.8)" />
+                <Text style={s.serviceTime}>9:00 AM &bull; 11:00 AM</Text>
               </View>
-              <TouchableOpacity
-                style={styles.profileButton}
-                onPress={() => router.push('/(tabs)/profile')}
-                activeOpacity={0.8}
-              >
-                {user?.avatar ? (
-                  <Image source={{ uri: user.avatar }} style={styles.avatar} />
-                ) : (
-                  <LinearGradient
-                    colors={theme.colors.gradients?.primary || ['#15803d', '#166534']}
-                    style={styles.avatarPlaceholder}
-                  >
-                    <Text style={styles.avatarText}>{user?.firstName?.charAt(0)}</Text>
-                  </LinearGradient>
-                )}
+              <TouchableOpacity style={s.liveBtn} activeOpacity={0.8}>
+                <Radio size={14} color={theme.colors.white} />
+                <Text style={s.liveBtnText}>Watch Live</Text>
+              </TouchableOpacity>
+            </LinearGradient>
+          </TouchableOpacity>
+
+          {serving && serving.status === 'pending' && (
+            <View style={s.servingCard}>
+              <View style={s.servingHeader}>
+                <Text style={s.servingTitle}>My Serving</Text>
+                <View style={s.servingBadge}><Text style={s.servingBadgeText}>PENDING</Text></View>
+              </View>
+              <Text style={s.servingDetail}>{serving.role} &bull; {serving.service}</Text>
+              <Text style={s.servingDate}>{serving.date}</Text>
+              <View style={s.servingActions}>
+                <TouchableOpacity style={s.confirmBtn} activeOpacity={0.8}>
+                  <Check size={16} color={theme.colors.white} />
+                  <Text style={s.confirmText}>Confirm</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.declineBtn} activeOpacity={0.8}>
+                  <X size={16} color={theme.colors.text.secondary} />
+                  <Text style={s.declineText}>Decline</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          )}
+
+          <View style={s.grid}>
+            {QUICK_ACTIONS.map((a) => (
+              <TouchableOpacity key={a.key} style={s.gridItem} activeOpacity={0.7} onPress={() => router.push(a.route as any)}>
+                <View style={[s.gridIcon, { backgroundColor: a.bg }]}>
+                  <a.icon size={22} color={a.color} />
+                </View>
+                <Text style={s.gridLabel}>{a.label}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+
+          <View style={s.section}>
+            <View style={s.sectionRow}>
+              <Text style={s.sectionTitle}>Announcements</Text>
+              <TouchableOpacity onPress={() => router.push('/announcements' as any)}>
+                <Text style={s.seeAll}>See All</Text>
               </TouchableOpacity>
             </View>
+            {announcements.map((a) => (
+              <View key={a.id} style={s.announcementCard}>
+                <View style={[s.annDot, { backgroundColor: CATEGORY_COLORS[a.category] || theme.colors.brandGreen }]} />
+                <View style={s.annContent}>
+                  <Text style={s.annTitle} numberOfLines={1}>{a.title}</Text>
+                  <Text style={s.annBody} numberOfLines={1}>{a.content}</Text>
+                </View>
+                <ChevronRight size={16} color={theme.colors.gray300} />
+              </View>
+            ))}
           </View>
 
-          {/* Featured / Next Step Card (Hero) */}
-          <TouchableOpacity
-            style={styles.heroCard}
-            activeOpacity={0.9}
-            onPress={() => router.push(nextStep.action as any)}
-          >
-            <LinearGradient
-              colors={['#ffffff', '#f8fafc']}
-              style={styles.heroGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-            >
-              <View style={styles.heroContent}>
-                <View style={styles.heroBadge}>
-                  <Text style={styles.heroBadgeText}>YOUR NEXT STEP</Text>
-                </View>
-                <Text style={styles.heroTitle}>{nextStep.title}</Text>
-                <Text style={styles.heroSubtitle}>{nextStep.subtitle}</Text>
-                <View style={styles.heroAction}>
-                  <Text style={styles.heroActionText}>Get Started</Text>
-                  <ArrowRight size={16} color={theme.colors.brandGreen} />
-                </View>
+          <TouchableOpacity style={s.sermonCard} activeOpacity={0.9} onPress={() => router.push('/(tabs)/media')}>
+            <LinearGradient colors={['#111827', '#1F2937']} style={s.sermonGrad} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+              <View style={s.playBtn}>
+                <Play size={22} color={theme.colors.white} fill={theme.colors.white} />
               </View>
-              <View style={styles.heroIconContainer}>
-                <Users size={64} color="rgba(22, 101, 52, 0.1)" />
+              <View style={s.sermonInfo}>
+                <Text style={s.sermonSeries}>UNSHAKEABLE FAITH</Text>
+                <Text style={s.sermonName}>Walking in Faith</Text>
+                <Text style={s.sermonMeta}>Pastor John Doe &bull; 35 min</Text>
               </View>
             </LinearGradient>
           </TouchableOpacity>
 
-          {/* Quick Actions Grid */}
-          <View style={styles.quickActionsContainer}>
-            <Text style={styles.sectionHeader}>Quick Actions</Text>
-            <View style={styles.grid}>
-              <QuickAction
-                icon={<Heart size={22} color={theme.colors.error} />}
-                label="Prayer"
-                onPress={() => router.push('/(tabs)')}
-                delay={0}
-              />
-              <QuickAction
-                icon={<Gift size={22} color={theme.colors.brandGreen} />}
-                label="Give"
-                onPress={() => router.push('/(tabs)/give')}
-                delay={100}
-              />
-              <QuickAction
-                icon={<Users size={22} color="#0EA5E9" />}
-                label="Groups"
-                onPress={() => router.push('/(tabs)/groups')}
-                delay={200}
-              />
-              <QuickAction
-                icon={<Calendar size={22} color="#F59E0B" />}
-                label="Events"
-                onPress={() => router.push('/(tabs)/events')}
-                delay={300}
-              />
-            </View>
-          </View>
-
-          {/* Sermon Card (Immersive) */}
-          <TouchableOpacity
-            style={styles.sermonCard}
-            activeOpacity={0.9}
-          >
-            <LinearGradient
-              colors={['#111827', '#1F2937']}
-              style={styles.sermonGradient}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 0 }}
-            >
-              <View style={styles.playButton}>
-                <Play size={24} color={theme.colors.white} fill={theme.colors.white} />
-              </View>
-              <View style={styles.sermonContent}>
-                <Text style={styles.sermonLabel}>LATEST MESSAGE</Text>
-                <Text style={styles.sermonTitle}>Walking in Faith</Text>
-                <Text style={styles.sermonSub}>Pastor John Doe • 35m</Text>
-              </View>
-            </LinearGradient>
-          </TouchableOpacity>
-
-          {/* Upcoming Events Horizontal Scroll */}
-          <View style={styles.section}>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={styles.sectionHeader}>Upcoming Events</Text>
+          <View style={s.section}>
+            <View style={s.sectionRow}>
+              <Text style={s.sectionTitle}>Upcoming Events</Text>
               <TouchableOpacity onPress={() => router.push('/(tabs)/events')}>
-                <Text style={styles.seeAll}>See All</Text>
+                <Text style={s.seeAll}>See All</Text>
               </TouchableOpacity>
             </View>
-
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.horizontalScroll}
-            >
-              {[1, 2, 3].map((_, index) => (
-                <View key={index} style={styles.eventCard}>
-                  <View style={styles.eventImagePlaceholder} />
-                  <View style={styles.eventCardContent}>
-                    <Text style={styles.eventDate}>OCT 15</Text>
-                    <Text style={styles.eventTitle}>Worship Night</Text>
-                    <View style={styles.eventLocationRow}>
-                      <MapPin size={12} color={theme.colors.gray400} />
-                      <Text style={styles.eventLocation}>Main Campus</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.hScroll}>
+              {events.map((ev) => {
+                const d = formatEventDate(ev.start_time);
+                return (
+                  <TouchableOpacity key={ev.id} style={s.eventCard} activeOpacity={0.8} onPress={() => router.push('/(tabs)/events')}>
+                    <View style={[s.dateBadge, { backgroundColor: CATEGORY_COLORS[ev.category] || theme.colors.brandGreen }]}>
+                      <Text style={s.dateMonth}>{d.month}</Text>
+                      <Text style={s.dateDay}>{d.day}</Text>
                     </View>
-                  </View>
-                </View>
-              ))}
+                    <View style={s.eventInfo}>
+                      <Text style={s.eventTitle} numberOfLines={1}>{ev.title}</Text>
+                      <View style={s.eventLocRow}>
+                        <MapPin size={12} color={theme.colors.gray400} />
+                        <Text style={s.eventLoc}>{ev.location}</Text>
+                      </View>
+                      <Text style={s.eventTime}>{d.time}</Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
             </ScrollView>
           </View>
 
@@ -237,274 +241,59 @@ export default function HomeScreen() {
   );
 }
 
-function QuickAction({ icon, label, onPress, delay }: any) {
-  return (
-    <TouchableOpacity
-      style={styles.quickAction}
-      onPress={onPress}
-      activeOpacity={0.7}
-    >
-      <View style={styles.quickActionIcon}>
-        {icon}
-      </View>
-      <Text style={styles.quickActionLabel}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: theme.colors.background.primary,
-  },
-  content: {
-    paddingHorizontal: theme.spacing.lg,
-    paddingTop: theme.spacing.md,
-  },
-  header: {
-    marginBottom: theme.spacing.xl,
-  },
-  headerTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  greeting: {
-    fontSize: theme.typography.sizes.base,
-    color: theme.colors.text.secondary,
-    fontWeight: '500',
-    marginBottom: 2,
-  },
-  userName: {
-    fontSize: 28, // Large typography for WOW factor
-    fontWeight: '800', // Extra bold
-    color: theme.colors.text.primary,
-    letterSpacing: -0.5,
-  },
-  profileButton: {
-    padding: 2,
-    backgroundColor: theme.colors.white,
-    borderRadius: 999,
-    ...theme.shadows.md,
-  },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-  },
-  avatarPlaceholder: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: {
-    color: theme.colors.white,
-    fontSize: 18,
-    fontWeight: '700',
-  },
-
-  // Hero Card
-  heroCard: {
-    borderRadius: theme.borderRadius.xl,
-    marginBottom: theme.spacing['2xl'],
-    ...theme.shadows.lg, // High elevation
-    backgroundColor: theme.colors.white,
-  },
-  heroGradient: {
-    borderRadius: theme.borderRadius.xl,
-    padding: 24,
-    position: 'relative',
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: theme.colors.border.light,
-  },
-  heroContent: {
-    zIndex: 10,
-  },
-  heroBadge: {
-    backgroundColor: 'rgba(22, 101, 52, 0.1)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    alignSelf: 'flex-start',
-    marginBottom: 12,
-  },
-  heroBadgeText: {
-    color: theme.colors.brandGreen,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  heroTitle: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: theme.colors.text.primary,
-    marginBottom: 6,
-  },
-  heroSubtitle: {
-    fontSize: 15,
-    color: theme.colors.text.secondary,
-    marginBottom: 16,
-    lineHeight: 22,
-  },
-  heroAction: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  heroActionText: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: theme.colors.brandGreen,
-  },
-  heroIconContainer: {
-    position: 'absolute',
-    right: -10,
-    bottom: -10,
-    opacity: 0.5,
-  },
-
-  // Quick Actions
-  quickActionsContainer: {
-    marginBottom: theme.spacing['3xl'],
-  },
-  grid: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  quickAction: {
-    flex: 1,
-    alignItems: 'center',
-    backgroundColor: theme.colors.white,
-    paddingVertical: 16,
-    borderRadius: theme.borderRadius.lg,
-    borderWidth: 1,
-    borderColor: theme.colors.border.light,
-    ...theme.shadows.sm,
-  },
-  quickActionIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: theme.colors.background.secondary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
-  },
-  quickActionLabel: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: theme.colors.text.primary,
-  },
-
-  // Sermon Card (Immersive)
-  sermonCard: {
-    marginBottom: theme.spacing['3xl'],
-    borderRadius: theme.borderRadius.xl,
-    ...theme.shadows.xl,
-  },
-  sermonGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 20,
-    borderRadius: theme.borderRadius.xl,
-  },
-  playButton: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.3)',
-  },
-  sermonContent: {
-    flex: 1,
-  },
-  sermonLabel: {
-    color: 'rgba(255,255,255,0.7)', // Light text on dark bg
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 1,
-    marginBottom: 4,
-  },
-  sermonTitle: {
-    color: theme.colors.white,
-    fontSize: 18,
-    fontWeight: '700',
-    marginBottom: 2,
-  },
-  sermonSub: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 13,
-  },
-
-  // Sections
-  section: {
-    marginBottom: theme.spacing['3xl'],
-  },
-  sectionHeaderRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  sectionHeader: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: theme.colors.text.primary,
-    marginBottom: 16,
-  },
-  seeAll: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: theme.colors.brandGreen,
-  },
-  horizontalScroll: {
-    paddingRight: 20,
-    gap: 16,
-  },
-  eventCard: {
-    width: width * 0.4,
-    backgroundColor: theme.colors.white,
-    borderRadius: theme.borderRadius.lg,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: theme.colors.border.light,
-    ...theme.shadows.md,
-  },
-  eventImagePlaceholder: {
-    height: 80,
-    backgroundColor: theme.colors.background.secondary,
-  },
-  eventCardContent: {
-    padding: 12,
-  },
-  eventDate: {
-    fontSize: 10,
-    fontWeight: '800',
-    color: theme.colors.brandGreen,
-    letterSpacing: 0.5,
-    marginBottom: 4,
-  },
-  eventTitle: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: theme.colors.text.primary,
-    marginBottom: 4,
-  },
-  eventLocationRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  eventLocation: {
-    fontSize: 11,
-    color: theme.colors.text.secondary,
-  },
+const s = StyleSheet.create({
+  root: { flex: 1, backgroundColor: theme.colors.background.primary }, safe: { flex: 1 },
+  scroll: { paddingHorizontal: theme.spacing.lg, paddingTop: theme.spacing.md },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: theme.spacing['2xl'] },
+  greeting: { fontSize: theme.typography.sizes['3xl'], fontWeight: '800' as const, color: theme.colors.text.primary, letterSpacing: -0.5 },
+  subtitle: { fontSize: theme.typography.sizes.base, color: theme.colors.text.secondary, marginTop: 2 },
+  avatar: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  avatarText: { color: theme.colors.white, fontSize: 18, fontWeight: '700' as const },
+  serviceCardWrap: { marginBottom: theme.spacing['2xl'], borderRadius: theme.borderRadius.xl, ...theme.shadows.lg },
+  serviceCard: { borderRadius: theme.borderRadius.xl, padding: theme.spacing['2xl'] },
+  serviceLabel: { color: 'rgba(255,255,255,0.7)', fontSize: 10, fontWeight: '800' as const, letterSpacing: 1, marginBottom: theme.spacing.sm },
+  serviceTitle: { color: theme.colors.white, fontSize: theme.typography.sizes['2xl'], fontWeight: '700' as const, marginBottom: theme.spacing.sm },
+  serviceRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: theme.spacing.lg },
+  serviceTime: { color: 'rgba(255,255,255,0.85)', fontSize: theme.typography.sizes.base },
+  liveBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(255,255,255,0.2)', alignSelf: 'flex-start', paddingHorizontal: 14, paddingVertical: 8, borderRadius: theme.borderRadius.full },
+  liveBtnText: { color: theme.colors.white, fontSize: theme.typography.sizes.sm, fontWeight: '600' as const },
+  servingCard: { backgroundColor: theme.colors.white, borderRadius: theme.borderRadius.xl, padding: theme.spacing.lg, marginBottom: theme.spacing['2xl'], borderWidth: 1, borderColor: theme.colors.border.light, ...theme.shadows.sm },
+  servingHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: theme.spacing.sm },
+  servingTitle: { fontSize: theme.typography.sizes.lg, fontWeight: '700' as const, color: theme.colors.text.primary },
+  servingBadge: { backgroundColor: '#FEF3C7', paddingHorizontal: 8, paddingVertical: 3, borderRadius: theme.borderRadius.sm },
+  servingBadgeText: { fontSize: 10, fontWeight: '700' as const, color: '#92400E' },
+  servingDetail: { fontSize: theme.typography.sizes.base, color: theme.colors.text.secondary, marginBottom: 2 },
+  servingDate: { fontSize: theme.typography.sizes.sm, color: theme.colors.text.tertiary, marginBottom: theme.spacing.md },
+  servingActions: { flexDirection: 'row', gap: theme.spacing.sm },
+  confirmBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: theme.colors.brandGreen, paddingHorizontal: 16, paddingVertical: 10, borderRadius: theme.borderRadius.md },
+  confirmText: { color: theme.colors.white, fontSize: theme.typography.sizes.sm, fontWeight: '600' as const },
+  declineBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: theme.colors.gray100, paddingHorizontal: 16, paddingVertical: 10, borderRadius: theme.borderRadius.md },
+  declineText: { color: theme.colors.text.secondary, fontSize: theme.typography.sizes.sm, fontWeight: '600' as const },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: theme.spacing.md, marginBottom: theme.spacing['2xl'] },
+  gridItem: { width: (width - theme.spacing.lg * 2 - theme.spacing.md) / 2, backgroundColor: theme.colors.white, borderRadius: theme.borderRadius.lg, padding: theme.spacing.lg, alignItems: 'center', borderWidth: 1, borderColor: theme.colors.border.light, ...theme.shadows.sm },
+  gridIcon: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', marginBottom: theme.spacing.sm },
+  gridLabel: { fontSize: theme.typography.sizes.base, fontWeight: '600' as const, color: theme.colors.text.primary },
+  section: { marginBottom: theme.spacing['2xl'] },
+  sectionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: theme.spacing.md },
+  sectionTitle: { fontSize: theme.typography.sizes.xl, fontWeight: '700' as const, color: theme.colors.text.primary },
+  seeAll: { fontSize: theme.typography.sizes.base, fontWeight: '600' as const, color: theme.colors.brandGreen },
+  announcementCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: theme.colors.white, borderRadius: theme.borderRadius.lg, padding: theme.spacing.md, marginBottom: theme.spacing.sm, borderWidth: 1, borderColor: theme.colors.border.light, ...theme.shadows.sm },
+  annDot: { width: 8, height: 8, borderRadius: 4, marginRight: theme.spacing.md },
+  annContent: { flex: 1, marginRight: theme.spacing.sm },
+  annTitle: { fontSize: theme.typography.sizes.base, fontWeight: '600' as const, color: theme.colors.text.primary, marginBottom: 2 },
+  annBody: { fontSize: theme.typography.sizes.sm, color: theme.colors.text.tertiary }, sermonCard: { marginBottom: theme.spacing['2xl'], borderRadius: theme.borderRadius.xl, ...theme.shadows.xl },
+  sermonGrad: { flexDirection: 'row', alignItems: 'center', padding: theme.spacing.xl, borderRadius: theme.borderRadius.xl },
+  playBtn: { width: 50, height: 50, borderRadius: 25, backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center', justifyContent: 'center', marginRight: theme.spacing.lg, borderWidth: 1, borderColor: 'rgba(255,255,255,0.25)' },
+  sermonInfo: { flex: 1 }, sermonSeries: { color: 'rgba(255,255,255,0.6)', fontSize: 10, fontWeight: '800' as const, letterSpacing: 1, marginBottom: 4 },
+  sermonName: { color: theme.colors.white, fontSize: theme.typography.sizes.xl, fontWeight: '700' as const, marginBottom: 2 },
+  sermonMeta: { color: 'rgba(255,255,255,0.7)', fontSize: theme.typography.sizes.sm },
+  hScroll: { paddingRight: theme.spacing.lg, gap: theme.spacing.md },
+  eventCard: { width: width * 0.42, backgroundColor: theme.colors.white, borderRadius: theme.borderRadius.lg, overflow: 'hidden', borderWidth: 1, borderColor: theme.colors.border.light, ...theme.shadows.sm },
+  dateBadge: { alignItems: 'center', justifyContent: 'center', paddingVertical: theme.spacing.sm },
+  dateMonth: { color: theme.colors.white, fontSize: 10, fontWeight: '700' as const, letterSpacing: 0.5 },
+  dateDay: { color: theme.colors.white, fontSize: theme.typography.sizes['2xl'], fontWeight: '800' as const },
+  eventInfo: { padding: theme.spacing.md },
+  eventTitle: { fontSize: theme.typography.sizes.base, fontWeight: '700' as const, color: theme.colors.text.primary, marginBottom: 4 },
+  eventLocRow: { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 2 },
+  eventLoc: { fontSize: theme.typography.sizes.xs, color: theme.colors.text.secondary }, eventTime: { fontSize: theme.typography.sizes.xs, color: theme.colors.text.tertiary },
 });

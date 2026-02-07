@@ -454,4 +454,70 @@ export const notificationsAPI = {
     },
 };
 
+export const prayerAPI = {
+  getAll: (params?: any) => api.get('/prayer', { params }).then(r => r.data),
+  getById: (id: string) => api.get(`/prayer/${id}`).then(r => r.data),
+  create: (data: any) => api.post('/prayer', data).then(r => r.data),
+  update: (id: string, data: any) => api.patch(`/prayer/${id}`, data).then(r => r.data),
+  pray: (id: string) => api.post(`/prayer/${id}/pray`).then(r => r.data),
+  addUpdate: (id: string, data: any) => api.post(`/prayer/${id}/updates`, data).then(r => r.data),
+  getCircles: () => api.get('/prayer/circles').then(r => r.data),
+  joinCircle: (id: string) => api.post(`/prayer/circles/${id}/join`).then(r => r.data),
+};
+
+export const announcementsAPI = {
+  getAll: (params?: any) => api.get('/announcements', { params }).then(r => r.data),
+  getById: (id: string) => api.get(`/announcements/${id}`).then(r => r.data),
+  acknowledge: (id: string) => api.post(`/announcements/${id}/acknowledge`).then(r => r.data),
+};
+
+export const directoryAPI = {
+  search: (params?: any) => api.get('/directory', { params }).then(r => r.data),
+  getProfile: (id: string) => api.get(`/directory/${id}`).then(r => r.data),
+};
+
+export const givingAPI = {
+  give: (data: any) => api.post('/giving', data).then(r => r.data),
+  getHistory: () => api.get('/giving/history').then(r => r.data),
+  getCampaigns: () => api.get('/giving/campaigns').then(r => r.data),
+  setupRecurring: (data: any) => api.post('/giving/recurring', data).then(r => r.data),
+};
+
+export const mediaAPI = {
+  getAll: (params?: any) => api.get('/media', { params }).then(r => r.data),
+  getById: (id: string) => api.get(`/media/${id}`).then(r => r.data),
+  getSeries: () => api.get('/media/series').then(r => r.data),
+  addBookmark: (id: string, data: any) => api.post(`/media/${id}/bookmarks`, data).then(r => r.data),
+  addNote: (id: string, data: any) => api.post(`/media/${id}/notes`, data).then(r => r.data),
+  getNotes: (id: string) => api.get(`/media/${id}/notes`).then(r => r.data),
+  getLivestream: () => api.get('/media/livestream').then(r => r.data),
+};
+
+export const storiesAPI = {
+  getAll: () => api.get('/stories').then(r => r.data),
+  create: (data: any) => api.post('/stories', data).then(r => r.data),
+  react: (id: string, emoji: string) => api.post(`/stories/${id}/react`, { emoji }).then(r => r.data),
+  view: (id: string) => api.post(`/stories/${id}/view`).then(r => r.data),
+};
+
+export const rehearsalAPI = {
+  getAll: (serviceId: string) => api.get(`/services/${serviceId}/rehearsals`).then(r => r.data),
+  create: (serviceId: string, data: any) => api.post(`/services/${serviceId}/rehearsals`, data).then(r => r.data),
+  respond: (id: string, status: string) => api.patch(`/rehearsals/${id}/respond`, { status }).then(r => r.data),
+};
+
+export const trainingAPI = {
+  getModules: (ministryId?: string) => api.get('/training', { params: { ministryId } }).then(r => r.data),
+  complete: (moduleId: string) => api.post(`/training/${moduleId}/complete`).then(r => r.data),
+  getProgress: () => api.get('/training/progress').then(r => r.data),
+};
+
+export const profileAPI = {
+  get: () => api.get('/profile').then(r => r.data),
+  update: (data: any) => api.patch('/profile', data).then(r => r.data),
+  getHousehold: () => api.get('/profile/household').then(r => r.data),
+  updateNotifications: (prefs: any) => api.patch('/profile/notifications', prefs).then(r => r.data),
+  updatePrivacy: (settings: any) => api.patch('/profile/privacy', settings).then(r => r.data),
+};
+
 export default api;

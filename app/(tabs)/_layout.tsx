@@ -1,86 +1,83 @@
-import { Tabs } from 'expo-router';
-import { Home, BookOpen, Users, Heart, User, Calendar } from 'lucide-react-native';
-import { StyleSheet, View, Platform } from 'react-native';
+import { Tabs, useRouter } from 'expo-router';
+import { Home, Newspaper, HandHelping, Users, Play, MessageCircle, Bell } from 'lucide-react-native';
+import { TouchableOpacity, View, StyleSheet } from 'react-native';
 import theme from '@/lib/theme';
 
 export default function TabLayout() {
+  const router = useRouter();
+
   return (
     <Tabs
       screenOptions={{
-        headerShown: false,
+        headerShown: true,
+        headerStyle: { backgroundColor: '#fff' },
+        headerTitleStyle: {
+          fontWeight: '700',
+          fontSize: 18,
+          color: theme.colors.brandDark,
+        },
+        headerShadowVisible: false,
+        headerRight: () => (
+          <View style={styles.headerRight}>
+            <TouchableOpacity onPress={() => router.push('/announcements')} style={styles.headerIcon}>
+              <Bell size={22} color={theme.colors.text.secondary} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => router.push('/messages')} style={styles.headerIcon}>
+              <MessageCircle size={22} color={theme.colors.text.secondary} />
+            </TouchableOpacity>
+          </View>
+        ),
         tabBarActiveTintColor: theme.colors.brandGreen,
         tabBarInactiveTintColor: theme.colors.text.tertiary,
-        tabBarStyle: styles.tabBar,
-        tabBarLabelStyle: styles.label,
-        tabBarItemStyle: styles.item,
-        tabBarBackground: () => <View style={styles.background} />,
+        tabBarStyle: {
+          backgroundColor: '#fff',
+          borderTopColor: theme.colors.border.light,
+          borderTopWidth: 1,
+          height: 85,
+          paddingTop: 8,
+          paddingBottom: 28,
+        },
+        tabBarLabelStyle: {
+          fontSize: 11,
+          fontWeight: '600',
+          marginTop: 2,
+        },
       }}
     >
       <Tabs.Screen
         name="index"
         options={{
           title: 'Home',
-          tabBarIcon: ({ color, size }) => <Home size={size} color={color} strokeWidth={2} />,
+          headerTitle: 'NewHope',
+          tabBarIcon: ({ size, color }) => <Home size={size} color={color} />,
         }}
       />
       <Tabs.Screen
-        name="feed"
+        name="social"
         options={{
-          title: 'Feed',
-          tabBarIcon: ({ color, size }) => (
-            <BookOpen size={size} color={color} strokeWidth={2} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="events"
-        options={{
-          title: 'Events',
-          tabBarIcon: ({ color, size }) => (
-            <Calendar size={size} color={color} strokeWidth={2} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="give"
-        options={{
-          title: 'Give',
-          tabBarIcon: ({ color, size }) => (
-            <Heart size={size} color={color} strokeWidth={2} />
-          ),
-        }}
-      />
-      <Tabs.Screen
-        name="profile"
-        options={{
-          title: 'Profile',
-          tabBarIcon: ({ color, size }) => <User size={size} color={color} strokeWidth={2} />,
-        }}
-      />
-
-      <Tabs.Screen
-        name="groups"
-        options={{
-          title: 'Groups',
-          tabBarIcon: ({ color, size }) => <Users size={size} color={color} strokeWidth={2} />,
+          title: 'Social',
+          tabBarIcon: ({ size, color }) => <Newspaper size={size} color={color} />,
         }}
       />
       <Tabs.Screen
         name="serve"
         options={{
-          href: null,
+          title: 'Serve',
+          tabBarIcon: ({ size, color }) => <HandHelping size={size} color={color} />,
+        }}
+      />
+      <Tabs.Screen
+        name="groups"
+        options={{
+          title: 'Groups',
+          tabBarIcon: ({ size, color }) => <Users size={size} color={color} />,
         }}
       />
       <Tabs.Screen
         name="media"
         options={{
-          href: null,
-        }}
-      />
-      <Tabs.Screen
-        name="messages"
-        options={{
-          href: null,
+          title: 'Media',
+          tabBarIcon: ({ size, color }) => <Play size={size} color={color} />,
         }}
       />
     </Tabs>
@@ -88,28 +85,13 @@ export default function TabLayout() {
 }
 
 const styles = StyleSheet.create({
-  tabBar: {
-    borderTopColor: theme.colors.border.light,
-    borderTopWidth: 1,
-    paddingBottom: Platform.OS === 'ios' ? 0 : 4,
-    height: Platform.OS === 'ios' ? 88 : 64,
-    backgroundColor: theme.colors.white,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 16,
+    gap: 16,
   },
-  background: {
-    flex: 1,
-    backgroundColor: theme.colors.white,
-  },
-  label: {
-    fontSize: 10,
-    marginBottom: Platform.OS === 'ios' ? 4 : 4,
-    fontWeight: '600',
-  },
-  item: {
-    paddingVertical: 8,
+  headerIcon: {
+    padding: 4,
   },
 });

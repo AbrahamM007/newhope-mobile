@@ -1,634 +1,160 @@
-import React, { useEffect, useState } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TouchableOpacity,
-  RefreshControl,
-  Modal,
-  TextInput,
-  ScrollView,
-  Alert,
-} from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useAuth } from '@/context/AuthContext';
-import { worshipAPI, servingAPI } from '@/lib/api';
-import {
-  Calendar,
-  Clock,
-  Check,
-  X,
-  Music,
-  Users,
-  Heart,
-  Plus,
-  FileText,
-  ChevronRight,
-} from 'lucide-react-native';
-import DateTimePicker from '@react-native-community/datetimepicker';
+import { Calendar, Clock, Check, X, Music, Users, Heart, Plus, FileText, MapPin, Award, ChevronRight, Play } from 'lucide-react-native';
 import theme from '@/lib/theme';
 
-interface ServingAssignment {
-  id: string;
-  date: string;
-  role: string;
-  status: 'PENDING' | 'CONFIRMED' | 'DECLINED';
-  notes?: string;
-  service?: { title: string; day: string; time: string };
-  ministry?: { name: string };
-}
+const MOCK_SCHEDULE = [
+  { id: '1', date: '2026-02-16', service: 'Sunday 9AM', role: 'Acoustic Guitar', status: 'pending', location: 'Main Auditorium' },
+  { id: '2', date: '2026-02-16', service: 'Sunday 11AM', role: 'Acoustic Guitar', status: 'confirmed', location: 'Main Auditorium' },
+  { id: '3', date: '2026-02-23', service: 'Sunday 9AM', role: 'Worship Leader', status: 'pending', location: 'Main Auditorium' },
+];
+const MOCK_SERVICES = [
+  { id: '1', title: 'Sunday Service', date: '2026-02-16', time: '9:00 AM', series: 'Walking in Faith', status: 'confirmed', songs: 4, team: 8, files: 3 },
+  { id: '2', title: 'Sunday Service', date: '2026-02-16', time: '11:00 AM', series: 'Walking in Faith', status: 'draft', songs: 4, team: 6, files: 2 },
+  { id: '3', title: 'Wednesday Night', date: '2026-02-19', time: '7:00 PM', series: 'Prayer & Worship', status: 'draft', songs: 3, team: 5, files: 1 },
+];
+const MOCK_TRAINING = [
+  { id: '1', title: 'Volunteer Orientation', description: 'Introduction to serving at NewHope', duration: 30, completed: true },
+  { id: '2', title: 'Safety & Security', description: 'Emergency procedures and child safety', duration: 20, completed: true },
+  { id: '3', title: 'Worship Team Standards', description: 'Musical and spiritual preparation guidelines', duration: 25, completed: false },
+  { id: '4', title: 'Tech & Production', description: 'Sound, lighting, and media basics', duration: 45, completed: false },
+];
 
-interface WorshipService {
-  id: string;
-  title: string;
-  date: string;
-  status: 'PLANNING' | 'READY' | 'COMPLETED';
-  notes?: string;
-  songs: WorshipSong[];
-  members: ServiceMember[];
-  files: ServiceFile[];
-  _count: { songs: number; members: number; files: number };
-}
-
-interface WorshipSong {
-  id: string;
-  title: string;
-  artist?: string;
-  key?: string;
-  bpm?: number;
-  order: number;
-}
-
-interface ServiceMember {
-  id: string;
-  userId: string;
-  instrument: string;
-  status: string;
-  user?: { id: string; firstName: string; lastName: string; avatar?: string };
-}
-
-interface ServiceFile {
-  id: string;
-  name: string;
-  url: string;
-  type: string;
-}
+type SubTab = 'schedule' | 'services' | 'training';
+const fmtMonth = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short' }).toUpperCase();
+const fmtDay = (d: string) => new Date(d + 'T00:00:00').getDate().toString();
+const fmtDate = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+const svcColor = (s: string) => s === 'confirmed' ? theme.colors.brandGreen : s === 'live' ? theme.colors.info : theme.colors.warning;
+const svcBg = (s: string) => s === 'confirmed' ? '#ecfdf5' : s === 'live' ? '#eff6ff' : '#fffbeb';
 
 export default function ServeScreen() {
-  const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<'my' | 'worship'>('my');
-  const [assignments, setAssignments] = useState<ServingAssignment[]>([]);
-  const [worshipServices, setWorshipServices] = useState<WorshipService[]>([]);
-  const [refreshing, setRefreshing] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [showCreateModal, setShowCreateModal] = useState(false);
-  const [selectedService, setSelectedService] = useState<WorshipService | null>(null);
-
-  // Create service form
-  const [newTitle, setNewTitle] = useState('');
-  const [newDate, setNewDate] = useState(new Date());
-  const [newNotes, setNewNotes] = useState('');
-  const [showDatePicker, setShowDatePicker] = useState(false);
-
-  const isLeader = user?.roles?.includes('LEADER') || user?.roles?.includes('ADMIN');
-
-  useEffect(() => {
-    loadData();
-  }, []);
-
-  const loadData = async () => {
-    try {
-      setLoading(true);
-      const [assignmentsData, worshipData] = await Promise.all([
-        servingAPI.getMySchedule(true).catch(() => []),
-        worshipAPI.getAll(true).catch(() => []),
-      ]);
-      setAssignments(assignmentsData || []);
-      setWorshipServices(worshipData || []);
-    } catch (error) {
-      console.error('Error loading data:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadData();
-    setRefreshing(false);
-  };
-
-  const handleRespond = async (assignmentId: string, status: 'CONFIRMED' | 'DECLINED') => {
-    try {
-      await servingAPI.respond(assignmentId, status);
-      await loadData();
-    } catch (error) {
-      console.error('Error responding:', error);
-    }
-  };
-
-  const handleCreateService = async () => {
-    if (!newTitle.trim()) {
-      Alert.alert('Error', 'Please enter a title');
-      return;
-    }
-
-    try {
-      await worshipAPI.create({
-        title: newTitle.trim(),
-        date: newDate.toISOString(),
-        notes: newNotes.trim() || undefined,
-      });
-      setNewTitle('');
-      setNewNotes('');
-      setNewDate(new Date());
-      setShowCreateModal(false);
-      await loadData();
-    } catch (error) {
-      console.error('Error creating service:', error);
-      Alert.alert('Error', 'Failed to create service');
-    }
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'CONFIRMED':
-      case 'READY':
-        return '#228B22';
-      case 'DECLINED':
-        return '#ef4444';
-      default:
-        return '#f59e0b';
-    }
-  };
-
-  const renderAssignment = ({ item }: { item: ServingAssignment }) => {
-    const assignmentDate = new Date(item.date);
-    const isPending = item.status === 'PENDING';
-
-    return (
-      <View style={styles.card}>
-        <View style={styles.dateColumn}>
-          <Text style={styles.dateMonth}>
-            {assignmentDate.toLocaleDateString('en-US', { month: 'short' })}
-          </Text>
-          <Text style={styles.dateDay}>{assignmentDate.getDate()}</Text>
-        </View>
-
-        <View style={styles.detailsColumn}>
-          <View style={styles.roleRow}>
-            <Music size={16} color="#228B22" />
-            <Text style={styles.roleText}>{item.role}</Text>
-          </View>
-
-          {item.service && (
-            <Text style={styles.serviceName}>{item.service.title}</Text>
-          )}
-
-          {isPending ? (
-            <View style={styles.actionButtons}>
-              <TouchableOpacity
-                style={styles.confirmButton}
-                onPress={() => handleRespond(item.id, 'CONFIRMED')}
-              >
-                <Check size={14} color="#fff" />
-                <Text style={styles.confirmButtonText}>Confirm</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={styles.declineButton}
-                onPress={() => handleRespond(item.id, 'DECLINED')}
-              >
-                <X size={14} color="#ef4444" />
-              </TouchableOpacity>
-            </View>
-          ) : (
-            <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) + '20' }]}>
-              <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
-                {item.status}
-              </Text>
-            </View>
-          )}
-        </View>
-      </View>
-    );
-  };
-
-  const renderWorshipService = ({ item }: { item: WorshipService }) => {
-    const serviceDate = new Date(item.date);
-
-    return (
-      <TouchableOpacity
-        style={styles.worshipCard}
-        onPress={() => setSelectedService(item)}
-      >
-        <View style={styles.worshipHeader}>
-          <View>
-            <Text style={styles.worshipTitle}>{item.title}</Text>
-            <View style={styles.worshipMeta}>
-              <Calendar size={12} color="#666" />
-              <Text style={styles.worshipDate}>
-                {serviceDate.toLocaleDateString('en-US', {
-                  weekday: 'short',
-                  month: 'short',
-                  day: 'numeric',
-                })}
-              </Text>
-            </View>
-          </View>
-          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) + '20' }]}>
-            <Text style={[styles.statusText, { color: getStatusColor(item.status) }]}>
-              {item.status}
-            </Text>
-          </View>
-        </View>
-
-        <View style={styles.worshipStats}>
-          <View style={styles.stat}>
-            <Music size={14} color="#228B22" />
-            <Text style={styles.statText}>{item._count?.songs || 0} songs</Text>
-          </View>
-          <View style={styles.stat}>
-            <Users size={14} color="#228B22" />
-            <Text style={styles.statText}>{item._count?.members || 0} team</Text>
-          </View>
-          <View style={styles.stat}>
-            <FileText size={14} color="#228B22" />
-            <Text style={styles.statText}>{item._count?.files || 0} files</Text>
-          </View>
-        </View>
-
-        <ChevronRight size={20} color="#ccc" style={styles.chevron} />
-      </TouchableOpacity>
-    );
-  };
+  const [activeTab, setActiveTab] = useState<SubTab>('schedule');
+  const [schedule, setSchedule] = useState(MOCK_SCHEDULE);
+  const [selectedService, setSelectedService] = useState<typeof MOCK_SERVICES[0] | null>(null);
+  const [detailTab, setDetailTab] = useState<'setlist' | 'team' | 'runsheet'>('setlist');
+  const done = MOCK_TRAINING.filter(t => t.completed).length;
+  const total = MOCK_TRAINING.length;
+  const tabs: { key: SubTab; label: string }[] = [
+    { key: 'schedule', label: 'My Schedule' }, { key: 'services', label: 'Services' }, { key: 'training', label: 'Training' },
+  ];
 
   return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.title}>Serve</Text>
-        {isLeader && activeTab === 'worship' && (
-          <TouchableOpacity
-            style={styles.createButton}
-            onPress={() => setShowCreateModal(true)}
-          >
-            <Plus size={20} color="#fff" />
-          </TouchableOpacity>
-        )}
-      </View>
-
-      <View style={styles.tabs}>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'my' && styles.activeTab]}
-          onPress={() => setActiveTab('my')}
-        >
-          <Text style={[styles.tabText, activeTab === 'my' && styles.activeTabText]}>
-            My Schedule
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.tab, activeTab === 'worship' && styles.activeTab]}
-          onPress={() => setActiveTab('worship')}
-        >
-          <Text style={[styles.tabText, activeTab === 'worship' && styles.activeTabText]}>
-            Worship Services
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      {activeTab === 'my' ? (
-        <FlatList
-          data={assignments}
-          renderItem={renderAssignment}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContent}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-          ListEmptyComponent={
-            !loading ? (
-              <View style={styles.emptyContainer}>
-                <Heart size={48} color="#ccc" />
-                <Text style={styles.emptyText}>No upcoming assignments</Text>
-              </View>
-            ) : null
-          }
-        />
-      ) : (
-        <FlatList
-          data={worshipServices}
-          renderItem={renderWorshipService}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.listContent}
-          refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
-          ListEmptyComponent={
-            !loading ? (
-              <View style={styles.emptyContainer}>
-                <Music size={48} color="#ccc" />
-                <Text style={styles.emptyText}>No worship services</Text>
-              </View>
-            ) : null
-          }
-        />
-      )}
-
-      {/* Create Service Modal */}
-      <Modal visible={showCreateModal} animationType="slide" transparent>
-        <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <TouchableOpacity onPress={() => setShowCreateModal(false)}>
-                <X size={24} color="#666" />
-              </TouchableOpacity>
-              <Text style={styles.modalTitle}>Create Service</Text>
-              <TouchableOpacity
-                style={styles.saveButton}
-                onPress={handleCreateService}
-              >
-                <Text style={styles.saveButtonText}>Create</Text>
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView>
-              <Text style={styles.label}>Title *</Text>
-              <TextInput
-                style={styles.input}
-                placeholder="e.g., Sunday Worship"
-                placeholderTextColor="#999"
-                value={newTitle}
-                onChangeText={setNewTitle}
-              />
-
-              <Text style={styles.label}>Date & Time *</Text>
-              <TouchableOpacity
-                style={styles.dateButton}
-                onPress={() => setShowDatePicker(true)}
-              >
-                <Calendar size={18} color="#228B22" />
-                <Text style={styles.dateButtonText}>
-                  {newDate.toLocaleDateString('en-US', {
-                    weekday: 'long',
-                    month: 'long',
-                    day: 'numeric',
-                    hour: 'numeric',
-                    minute: '2-digit',
-                  })}
-                </Text>
-              </TouchableOpacity>
-
-              {showDatePicker && (
-                <DateTimePicker
-                  value={newDate}
-                  mode="datetime"
-                  display="default"
-                  onChange={(event, date) => {
-                    setShowDatePicker(false);
-                    if (date) setNewDate(date);
-                  }}
-                />
-              )}
-
-              <Text style={styles.label}>Notes</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                placeholder="Special instructions for the team..."
-                placeholderTextColor="#999"
-                multiline
-                value={newNotes}
-                onChangeText={setNewNotes}
-              />
-            </ScrollView>
-          </View>
+    <SafeAreaView style={s.container}>
+      <ScrollView showsVerticalScrollIndicator={false}>
+        <View style={s.banner}>
+          <Heart size={28} color={theme.colors.white} />
+          <Text style={s.bannerTitle}>Your Ministry Matters</Text>
+          <Text style={s.bannerSub}>Manage your serving schedule and worship planning</Text>
         </View>
-      </Modal>
-
-      {/* Service Detail Modal */}
-      <Modal visible={!!selectedService} animationType="slide">
-        <ServiceDetailView
-          service={selectedService}
-          onClose={() => setSelectedService(null)}
-          onUpdate={loadData}
-          isLeader={isLeader}
-        />
-      </Modal>
-    </SafeAreaView>
-  );
-}
-
-// Service Detail Component
-function ServiceDetailView({
-  service,
-  onClose,
-  onUpdate,
-  isLeader,
-}: {
-  service: WorshipService | null;
-  onClose: () => void;
-  onUpdate: () => void;
-  isLeader: boolean;
-}) {
-  const [activeSection, setActiveSection] = useState<'songs' | 'team' | 'files'>('songs');
-  const [showAddSong, setShowAddSong] = useState(false);
-  const [newSongTitle, setNewSongTitle] = useState('');
-  const [newSongArtist, setNewSongArtist] = useState('');
-  const [newSongKey, setNewSongKey] = useState('');
-
-  if (!service) return null;
-
-  const handleAddSong = async () => {
-    if (!newSongTitle.trim()) return;
-
-    try {
-      await worshipAPI.addSong(service.id, {
-        title: newSongTitle.trim(),
-        artist: newSongArtist.trim() || undefined,
-        key: newSongKey.trim() || undefined,
-      });
-      setNewSongTitle('');
-      setNewSongArtist('');
-      setNewSongKey('');
-      setShowAddSong(false);
-      onUpdate();
-    } catch (error) {
-      console.error('Error adding song:', error);
-    }
-  };
-
-  return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.detailHeader}>
-        <TouchableOpacity onPress={onClose}>
-          <X size={24} color="#333" />
-        </TouchableOpacity>
-        <View style={styles.detailTitleContainer}>
-          <Text style={styles.detailTitle}>{service.title}</Text>
-          <Text style={styles.detailDate}>
-            {new Date(service.date).toLocaleDateString('en-US', {
-              weekday: 'long',
-              month: 'long',
-              day: 'numeric',
-            })}
-          </Text>
+        <View style={s.tabRow}>
+          {tabs.map(t => (
+            <TouchableOpacity key={t.key} style={[s.subTab, activeTab === t.key && s.subTabOn]} onPress={() => setActiveTab(t.key)}>
+              <Text style={[s.subTabTxt, activeTab === t.key && s.subTabTxtOn]}>{t.label}</Text>
+            </TouchableOpacity>
+          ))}
         </View>
-      </View>
-
-      <View style={styles.sectionTabs}>
-        <TouchableOpacity
-          style={[styles.sectionTab, activeSection === 'songs' && styles.activeSectionTab]}
-          onPress={() => setActiveSection('songs')}
-        >
-          <Music size={16} color={activeSection === 'songs' ? '#228B22' : '#666'} />
-          <Text style={[styles.sectionTabText, activeSection === 'songs' && styles.activeSectionTabText]}>
-            Songs ({service.songs?.length || 0})
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.sectionTab, activeSection === 'team' && styles.activeSectionTab]}
-          onPress={() => setActiveSection('team')}
-        >
-          <Users size={16} color={activeSection === 'team' ? '#228B22' : '#666'} />
-          <Text style={[styles.sectionTabText, activeSection === 'team' && styles.activeSectionTabText]}>
-            Team ({service.members?.length || 0})
-          </Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          style={[styles.sectionTab, activeSection === 'files' && styles.activeSectionTab]}
-          onPress={() => setActiveSection('files')}
-        >
-          <FileText size={16} color={activeSection === 'files' ? '#228B22' : '#666'} />
-          <Text style={[styles.sectionTabText, activeSection === 'files' && styles.activeSectionTabText]}>
-            Files ({service.files?.length || 0})
-          </Text>
-        </TouchableOpacity>
-      </View>
-
-      <ScrollView style={styles.sectionContent}>
-        {activeSection === 'songs' && (
-          <>
-            {isLeader && (
-              <TouchableOpacity
-                style={styles.addButton}
-                onPress={() => setShowAddSong(true)}
-              >
-                <Plus size={18} color="#228B22" />
-                <Text style={styles.addButtonText}>Add Song</Text>
-              </TouchableOpacity>
-            )}
-
-            {service.songs?.map((song, index) => (
-              <View key={song.id} style={styles.songItem}>
-                <Text style={styles.songNumber}>{index + 1}</Text>
-                <View style={styles.songInfo}>
-                  <Text style={styles.songTitle}>{song.title}</Text>
-                  {song.artist && (
-                    <Text style={styles.songArtist}>{song.artist}</Text>
-                  )}
-                </View>
-                {song.key && (
-                  <View style={styles.keyBadge}>
-                    <Text style={styles.keyText}>{song.key}</Text>
+        <View style={s.content}>
+          {activeTab === 'schedule' && (schedule.length === 0 ? (
+            <View style={s.empty}><Calendar size={48} color={theme.colors.gray300} /><Text style={s.emptyTxt}>No upcoming assignments</Text></View>
+          ) : schedule.map(item => (
+            <View key={item.id} style={s.schCard}>
+              <View style={s.dateBadge}>
+                <Text style={s.dateM}>{fmtMonth(item.date)}</Text>
+                <Text style={s.dateD}>{fmtDay(item.date)}</Text>
+              </View>
+              <View style={s.schInfo}>
+                <Text style={s.schTitle}>{item.service}</Text>
+                <View style={s.row}><Music size={13} color={theme.colors.brandGreen} /><Text style={s.schRole}>{item.role}</Text></View>
+                <View style={s.row}><MapPin size={13} color={theme.colors.gray400} /><Text style={s.schMeta}>{item.location}</Text></View>
+                {item.status === 'pending' ? (
+                  <View style={s.actRow}>
+                    <TouchableOpacity style={s.cfmBtn} onPress={() => setSchedule(p => p.map(x => x.id === item.id ? { ...x, status: 'confirmed' } : x))}>
+                      <Check size={14} color={theme.colors.white} /><Text style={s.cfmTxt}>Confirm</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={s.decBtn} onPress={() => setSchedule(p => p.map(x => x.id === item.id ? { ...x, status: 'declined' } : x))}>
+                      <X size={14} color={theme.colors.error} /><Text style={s.decTxt}>Decline</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <View style={[s.stBadge, { backgroundColor: item.status === 'confirmed' ? '#ecfdf5' : '#fef2f2' }]}>
+                    <Text style={[s.stTxt, { color: item.status === 'confirmed' ? theme.colors.brandGreen : theme.colors.error }]}>
+                      {item.status === 'confirmed' ? 'Confirmed' : 'Declined'}
+                    </Text>
                   </View>
                 )}
               </View>
-            ))}
-          </>
-        )}
-
-        {activeSection === 'team' && (
-          <>
-            {isLeader && (
-              <TouchableOpacity style={styles.addButton}>
-                <Plus size={18} color="#228B22" />
-                <Text style={styles.addButtonText}>Add Team Member</Text>
+            </View>
+          )))}
+          {activeTab === 'services' && (<>
+            {MOCK_SERVICES.map(svc => (
+              <TouchableOpacity key={svc.id} style={s.svcCard} onPress={() => { setSelectedService(svc); setDetailTab('setlist'); }} activeOpacity={0.7}>
+                <View style={s.svcTop}>
+                  <View style={s.svcLeft}>
+                    <Text style={s.svcTitle}>{svc.title}</Text>
+                    <Text style={s.svcSeries}>{svc.series}</Text>
+                    <View style={s.row}><Calendar size={13} color={theme.colors.gray400} /><Text style={s.svcMeta}>{fmtDate(svc.date)} at {svc.time}</Text></View>
+                  </View>
+                  <View style={[s.svcStBadge, { backgroundColor: svcBg(svc.status) }]}>
+                    <Text style={[s.svcStTxt, { color: svcColor(svc.status) }]}>{svc.status.charAt(0).toUpperCase() + svc.status.slice(1)}</Text>
+                  </View>
+                </View>
+                <View style={s.svcStats}>
+                  <View style={s.stat}><Music size={14} color={theme.colors.brandGreen} /><Text style={s.statTxt}>{svc.songs} songs</Text></View>
+                  <View style={s.stat}><Users size={14} color={theme.colors.brandGreen} /><Text style={s.statTxt}>{svc.team} team</Text></View>
+                  <View style={s.stat}><FileText size={14} color={theme.colors.brandGreen} /><Text style={s.statTxt}>{svc.files} files</Text></View>
+                  <ChevronRight size={18} color={theme.colors.gray300} style={s.chev} />
+                </View>
               </TouchableOpacity>
-            )}
-
-            {service.members?.map((member) => (
-              <View key={member.id} style={styles.memberItem}>
-                <View style={styles.memberAvatar}>
-                  <Text style={styles.avatarText}>
-                    {member.user?.firstName?.charAt(0) || '?'}
-                  </Text>
+            ))}
+            <TouchableOpacity style={s.fab}><Plus size={24} color={theme.colors.white} /></TouchableOpacity>
+          </>)}
+          {activeTab === 'training' && (<>
+            <View style={s.progCard}>
+              <View style={s.progHead}><Text style={s.progTitle}>Your Progress</Text><Text style={s.progCount}>{done}/{total} modules</Text></View>
+              <View style={s.progBg}><View style={[s.progFill, { width: `${(done / total) * 100}%` }]} /></View>
+              {done === total && <View style={s.allDone}><Award size={16} color={theme.colors.brandGreen} /><Text style={s.allDoneTxt}>All modules completed!</Text></View>}
+            </View>
+            {MOCK_TRAINING.map(mod => (
+              <View key={mod.id} style={s.trCard}>
+                <View style={[s.trIcon, mod.completed && s.trIconDone]}>
+                  {mod.completed ? <Check size={18} color={theme.colors.white} /> : <Play size={18} color={theme.colors.brandGreen} />}
                 </View>
-                <View style={styles.memberInfo}>
-                  <Text style={styles.memberName}>
-                    {member.user?.firstName} {member.user?.lastName}
-                  </Text>
-                  <Text style={styles.memberInstrument}>{member.instrument}</Text>
-                </View>
-                <View style={[styles.statusBadge, { backgroundColor: getStatusColorForMember(member.status) + '20' }]}>
-                  <Text style={[styles.statusText, { color: getStatusColorForMember(member.status) }]}>
-                    {member.status}
-                  </Text>
+                <View style={s.trInfo}>
+                  <Text style={s.trTitle}>{mod.title}</Text>
+                  <Text style={s.trDesc}>{mod.description}</Text>
+                  <View style={s.trMeta}>
+                    <Clock size={12} color={theme.colors.gray400} /><Text style={s.trDur}>{mod.duration} min</Text>
+                    <View style={[s.trSt, { backgroundColor: mod.completed ? '#ecfdf5' : '#f3f4f6' }]}>
+                      <Text style={[s.trStTxt, { color: mod.completed ? theme.colors.brandGreen : theme.colors.gray500 }]}>{mod.completed ? 'Completed' : 'Not Started'}</Text>
+                    </View>
+                  </View>
                 </View>
               </View>
             ))}
-          </>
-        )}
-
-        {activeSection === 'files' && (
-          <>
-            {isLeader && (
-              <TouchableOpacity style={styles.addButton}>
-                <Plus size={18} color="#228B22" />
-                <Text style={styles.addButtonText}>Upload File</Text>
-              </TouchableOpacity>
-            )}
-
-            {service.files?.map((file) => (
-              <TouchableOpacity key={file.id} style={styles.fileItem}>
-                <FileText size={20} color="#228B22" />
-                <View style={styles.fileInfo}>
-                  <Text style={styles.fileName}>{file.name}</Text>
-                  <Text style={styles.fileType}>{file.type}</Text>
-                </View>
-              </TouchableOpacity>
-            ))}
-          </>
-        )}
+          </>)}
+        </View>
       </ScrollView>
-
-      {/* Add Song Modal */}
-      <Modal visible={showAddSong} animationType="slide" transparent>
-        <View style={styles.modalContainer}>
-          <View style={styles.modalContent}>
-            <View style={styles.modalHeader}>
-              <TouchableOpacity onPress={() => setShowAddSong(false)}>
-                <X size={24} color="#666" />
-              </TouchableOpacity>
-              <Text style={styles.modalTitle}>Add Song</Text>
-              <TouchableOpacity
-                style={styles.saveButton}
-                onPress={handleAddSong}
-              >
-                <Text style={styles.saveButtonText}>Add</Text>
-              </TouchableOpacity>
+      <Modal visible={!!selectedService} animationType="slide" transparent>
+        <View style={s.modalOv}>
+          <View style={s.modalSheet}>
+            <View style={s.modalHead}>
+              <TouchableOpacity onPress={() => setSelectedService(null)}><X size={22} color={theme.colors.gray600} /></TouchableOpacity>
+              <Text style={s.modalTitle}>{selectedService?.title} - {selectedService?.time}</Text>
+              <View style={{ width: 22 }} />
             </View>
-
-            <Text style={styles.label}>Song Title *</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Enter song title"
-              placeholderTextColor="#999"
-              value={newSongTitle}
-              onChangeText={setNewSongTitle}
-            />
-
-            <Text style={styles.label}>Artist</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Artist name"
-              placeholderTextColor="#999"
-              value={newSongArtist}
-              onChangeText={setNewSongArtist}
-            />
-
-            <Text style={styles.label}>Key</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="e.g., G, C#m"
-              placeholderTextColor="#999"
-              value={newSongKey}
-              onChangeText={setNewSongKey}
-            />
+            <View style={s.dtTabs}>
+              {(['setlist', 'team', 'runsheet'] as const).map(dt => (
+                <TouchableOpacity key={dt} style={[s.dtTab, detailTab === dt && s.dtTabOn]} onPress={() => setDetailTab(dt)}>
+                  <Text style={[s.dtTabTxt, detailTab === dt && s.dtTabTxtOn]}>{dt === 'setlist' ? 'Setlist' : dt === 'team' ? 'Team' : 'Run of Show'}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <View style={s.dtContent}>
+              <Text style={s.dtPlace}>
+                {detailTab === 'setlist' ? `${selectedService?.songs} songs planned for this service` : detailTab === 'team' ? `${selectedService?.team} team members assigned` : 'Service run-of-show details coming soon'}
+              </Text>
+            </View>
           </View>
         </View>
       </Modal>
@@ -636,154 +162,75 @@ function ServiceDetailView({
   );
 }
 
-function getStatusColorForMember(status: string) {
-  switch (status) {
-    case 'CONFIRMED':
-      return '#228B22';
-    case 'DECLINED':
-      return '#ef4444';
-    default:
-      return '#f59e0b';
-  }
-}
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: theme.colors.background.secondary,
-  },
-  header: {
-    paddingHorizontal: theme.spacing.lg,
-    paddingVertical: theme.spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border.light,
-    backgroundColor: theme.colors.white,
-  },
-  title: {
-    fontSize: theme.typography.sizes['2xl'],
-    fontWeight: theme.typography.weights.semibold as any,
-    color: theme.colors.text.primary,
-  },
-  createButton: {
-    backgroundColor: '#228B22',
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    justifyContent: 'center',
-  },
-  tabs: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  tab: { paddingVertical: 12, paddingHorizontal: 16, marginRight: 8 },
-  activeTab: { borderBottomWidth: 2, borderBottomColor: '#228B22' },
-  tabText: { fontSize: 14, fontWeight: '500', color: '#666' },
-  activeTabText: { color: '#228B22' },
-  listContent: { padding: 12 },
-  card: {
-    flexDirection: 'row',
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: '#f0f0f0',
-  },
-  dateColumn: { width: 50, alignItems: 'center', marginRight: 14 },
-  dateMonth: { fontSize: 11, fontWeight: '600', color: '#228B22', textTransform: 'uppercase' },
-  dateDay: { fontSize: 24, fontWeight: '700', color: '#1a1a1a' },
-  detailsColumn: { flex: 1 },
-  roleRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6 },
-  roleText: { fontSize: 15, fontWeight: '600', color: '#1a1a1a' },
-  serviceName: { fontSize: 13, color: '#666', marginBottom: 8 },
-  actionButtons: { flexDirection: 'row', gap: 8, marginTop: 8 },
-  confirmButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#228B22',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 6,
-    gap: 6,
-  },
-  confirmButtonText: { color: '#fff', fontSize: 12, fontWeight: '600' },
-  declineButton: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: '#ef4444',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 6,
-  },
-  statusBadge: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginTop: 8,
-  },
-  statusText: { fontSize: 11, fontWeight: '600', textTransform: 'capitalize' },
-  worshipCard: {
-    backgroundColor: '#fff',
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 8,
-    borderWidth: 1,
-    borderColor: '#f0f0f0',
-  },
-  worshipHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 },
-  worshipTitle: { fontSize: 16, fontWeight: '600', color: '#1a1a1a' },
-  worshipMeta: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
-  worshipDate: { fontSize: 12, color: '#666' },
-  worshipStats: { flexDirection: 'row', gap: 16 },
-  stat: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  statText: { fontSize: 12, color: '#666' },
-  chevron: { position: 'absolute', right: 14, top: '50%' },
-  emptyContainer: { alignItems: 'center', paddingTop: 60 },
-  emptyText: { textAlign: 'center', fontSize: 16, fontWeight: '600', color: '#333', marginTop: 12 },
-  modalContainer: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: '#fff', borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 16, minHeight: 350 },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
-  modalTitle: { fontSize: 16, fontWeight: '600', color: '#1a1a1a' },
-  saveButton: { backgroundColor: '#228B22', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 6 },
-  saveButtonText: { color: '#fff', fontWeight: '600', fontSize: 13 },
-  label: { fontSize: 13, fontWeight: '600', color: '#333', marginBottom: 6, marginTop: 12 },
-  input: { borderWidth: 1, borderColor: '#ddd', borderRadius: 8, padding: 12, fontSize: 14, color: '#333' },
-  textArea: { minHeight: 80, textAlignVertical: 'top' },
-  dateButton: { flexDirection: 'row', alignItems: 'center', gap: 12, padding: 12, borderWidth: 1, borderColor: '#ddd', borderRadius: 8 },
-  dateButtonText: { fontSize: 14, color: '#333' },
-  detailHeader: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: '#eee', backgroundColor: '#fff' },
-  detailTitleContainer: { marginLeft: 12 },
-  detailTitle: { fontSize: 18, fontWeight: '600', color: '#1a1a1a' },
-  detailDate: { fontSize: 13, color: '#666', marginTop: 2 },
-  sectionTabs: { flexDirection: 'row', backgroundColor: '#fff', borderBottomWidth: 1, borderBottomColor: '#eee' },
-  sectionTab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, paddingVertical: 12 },
-  activeSectionTab: { borderBottomWidth: 2, borderBottomColor: '#228B22' },
-  sectionTabText: { fontSize: 12, color: '#666' },
-  activeSectionTabText: { color: '#228B22', fontWeight: '600' },
-  sectionContent: { flex: 1, padding: 16 },
-  addButton: { flexDirection: 'row', alignItems: 'center', gap: 8, padding: 14, borderWidth: 1, borderStyle: 'dashed', borderColor: '#228B22', borderRadius: 10, marginBottom: 12 },
-  addButtonText: { color: '#228B22', fontWeight: '600' },
-  songItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', padding: 14, borderRadius: 10, marginBottom: 8, borderWidth: 1, borderColor: '#f0f0f0' },
-  songNumber: { width: 24, fontSize: 14, fontWeight: '600', color: '#228B22' },
-  songInfo: { flex: 1 },
-  songTitle: { fontSize: 14, fontWeight: '600', color: '#1a1a1a' },
-  songArtist: { fontSize: 12, color: '#666', marginTop: 2 },
-  keyBadge: { backgroundColor: '#f0fff0', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 },
-  keyText: { fontSize: 12, fontWeight: '600', color: '#228B22' },
-  memberItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', padding: 14, borderRadius: 10, marginBottom: 8, borderWidth: 1, borderColor: '#f0f0f0' },
-  memberAvatar: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#228B22', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
-  avatarText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  memberInfo: { flex: 1 },
-  memberName: { fontSize: 14, fontWeight: '600', color: '#1a1a1a' },
-  memberInstrument: { fontSize: 12, color: '#666', marginTop: 2 },
-  fileItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#fff', padding: 14, borderRadius: 10, marginBottom: 8, borderWidth: 1, borderColor: '#f0f0f0' },
-  fileInfo: { flex: 1, marginLeft: 12 },
-  fileName: { fontSize: 14, fontWeight: '600', color: '#1a1a1a' },
-  fileType: { fontSize: 11, color: '#228B22', textTransform: 'uppercase', marginTop: 2 },
+const s = StyleSheet.create({
+  container: { flex: 1, backgroundColor: theme.colors.background.secondary },
+  banner: { backgroundColor: theme.colors.brandGreen, marginHorizontal: 16, marginTop: 16, borderRadius: 16, padding: 24, alignItems: 'center' },
+  bannerTitle: { fontSize: 22, fontWeight: '700', color: theme.colors.white, marginTop: 10 },
+  bannerSub: { fontSize: 13, color: 'rgba(255,255,255,0.85)', marginTop: 6, textAlign: 'center' },
+  tabRow: { flexDirection: 'row', marginHorizontal: 16, marginTop: 20, backgroundColor: theme.colors.gray100, borderRadius: 12, padding: 4 },
+  subTab: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 10 },
+  subTabOn: { backgroundColor: theme.colors.white, ...theme.shadows.sm },
+  subTabTxt: { fontSize: 13, fontWeight: '500', color: theme.colors.gray500 },
+  subTabTxtOn: { color: theme.colors.brandGreen, fontWeight: '600' },
+  content: { paddingHorizontal: 16, paddingTop: 16, paddingBottom: 32 },
+  empty: { alignItems: 'center', paddingTop: 60 },
+  emptyTxt: { fontSize: 16, fontWeight: '600', color: theme.colors.gray500, marginTop: 12 },
+  schCard: { flexDirection: 'row', backgroundColor: theme.colors.white, borderRadius: 12, padding: 14, marginBottom: 10, ...theme.shadows.sm },
+  dateBadge: { width: 52, alignItems: 'center', justifyContent: 'center', backgroundColor: '#f0fdf4', borderRadius: 10, paddingVertical: 8, marginRight: 14 },
+  dateM: { fontSize: 11, fontWeight: '700', color: theme.colors.brandGreen },
+  dateD: { fontSize: 22, fontWeight: '700', color: theme.colors.brandDark },
+  schInfo: { flex: 1 },
+  schTitle: { fontSize: 15, fontWeight: '600', color: theme.colors.brandDark },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 4 },
+  schRole: { fontSize: 13, fontWeight: '500', color: theme.colors.text.secondary },
+  schMeta: { fontSize: 12, color: theme.colors.gray400 },
+  actRow: { flexDirection: 'row', gap: 8, marginTop: 10 },
+  cfmBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: theme.colors.brandGreen, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8 },
+  cfmTxt: { fontSize: 12, fontWeight: '600', color: theme.colors.white },
+  decBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: '#fef2f2', paddingHorizontal: 14, paddingVertical: 8, borderRadius: 8, borderWidth: 1, borderColor: '#fecaca' },
+  decTxt: { fontSize: 12, fontWeight: '600', color: theme.colors.error },
+  stBadge: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, marginTop: 10 },
+  stTxt: { fontSize: 11, fontWeight: '600' },
+  svcCard: { backgroundColor: theme.colors.white, borderRadius: 12, padding: 14, marginBottom: 10, ...theme.shadows.sm },
+  svcTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  svcLeft: { flex: 1 },
+  svcTitle: { fontSize: 16, fontWeight: '600', color: theme.colors.brandDark },
+  svcSeries: { fontSize: 13, color: theme.colors.brandGreen, fontWeight: '500', marginTop: 2 },
+  svcMeta: { fontSize: 12, color: theme.colors.gray500 },
+  svcStBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12 },
+  svcStTxt: { fontSize: 11, fontWeight: '600' },
+  svcStats: { flexDirection: 'row', gap: 16, marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: theme.colors.border.light },
+  stat: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  statTxt: { fontSize: 12, color: theme.colors.gray500 },
+  chev: { marginLeft: 'auto' },
+  fab: { alignSelf: 'center', backgroundColor: theme.colors.brandGreen, width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', marginTop: 16, ...theme.shadows.md },
+  progCard: { backgroundColor: theme.colors.white, borderRadius: 12, padding: 16, marginBottom: 16, ...theme.shadows.sm },
+  progHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  progTitle: { fontSize: 15, fontWeight: '600', color: theme.colors.brandDark },
+  progCount: { fontSize: 13, fontWeight: '500', color: theme.colors.brandGreen },
+  progBg: { height: 8, backgroundColor: theme.colors.gray100, borderRadius: 4, overflow: 'hidden' },
+  progFill: { height: 8, backgroundColor: theme.colors.brandGreen, borderRadius: 4 },
+  allDone: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 10, backgroundColor: '#ecfdf5', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 8, alignSelf: 'flex-start' },
+  allDoneTxt: { fontSize: 12, fontWeight: '600', color: theme.colors.brandGreen },
+  trCard: { flexDirection: 'row', backgroundColor: theme.colors.white, borderRadius: 12, padding: 14, marginBottom: 10, ...theme.shadows.sm },
+  trIcon: { width: 40, height: 40, borderRadius: 20, backgroundColor: '#f0fdf4', alignItems: 'center', justifyContent: 'center', marginRight: 12 },
+  trIconDone: { backgroundColor: theme.colors.brandGreen },
+  trInfo: { flex: 1 },
+  trTitle: { fontSize: 14, fontWeight: '600', color: theme.colors.brandDark },
+  trDesc: { fontSize: 12, color: theme.colors.gray500, marginTop: 2 },
+  trMeta: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 6 },
+  trDur: { fontSize: 11, color: theme.colors.gray400 },
+  trSt: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8, marginLeft: 6 },
+  trStTxt: { fontSize: 10, fontWeight: '600' },
+  modalOv: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
+  modalSheet: { backgroundColor: theme.colors.white, borderTopLeftRadius: 20, borderTopRightRadius: 20, minHeight: 380, paddingBottom: 32 },
+  modalHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: theme.colors.border.light },
+  modalTitle: { fontSize: 15, fontWeight: '600', color: theme.colors.brandDark },
+  dtTabs: { flexDirection: 'row', borderBottomWidth: 1, borderBottomColor: theme.colors.border.light, paddingHorizontal: 16 },
+  dtTab: { paddingVertical: 12, paddingHorizontal: 14, marginRight: 4 },
+  dtTabOn: { borderBottomWidth: 2, borderBottomColor: theme.colors.brandGreen },
+  dtTabTxt: { fontSize: 13, fontWeight: '500', color: theme.colors.gray500 },
+  dtTabTxtOn: { color: theme.colors.brandGreen, fontWeight: '600' },
+  dtContent: { padding: 24, alignItems: 'center' },
+  dtPlace: { fontSize: 14, color: theme.colors.gray500, textAlign: 'center' },
 });
