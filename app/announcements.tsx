@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,21 +6,16 @@ import {
   TouchableOpacity,
   Image,
   StyleSheet,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { ArrowLeft, Calendar, Check } from 'lucide-react-native';
 import { colors } from '@/lib/theme';
+import { announcementsAPI } from '@/lib/api';
 
 const brandGreen = colors.brandGreen;
 const brandDark = colors.brandDark;
-
-const MOCK_ANNOUNCEMENTS = [
-  { id: '1', title: 'Easter Services Schedule', content: 'Join us for our special Easter celebration services on April 20th! We will have services at 8AM, 9:30AM, and 11AM. Invite your friends and family for this incredible weekend of worship and celebration.', category: 'church_wide', priority: 'high', published_at: '2026-02-07T10:00:00', requires_ack: false, image: 'https://images.pexels.com/photos/2351722/pexels-photo-2351722.jpeg?auto=compress&cs=tinysrgb&w=600' },
-  { id: '2', title: 'Volunteer Appreciation Dinner', content: 'We want to honor all our amazing volunteers! Join us for a special appreciation dinner on March 15th at 6PM in the Fellowship Hall.', category: 'volunteers', priority: 'normal', published_at: '2026-02-06T14:00:00', requires_ack: true, image: null },
-  { id: '3', title: 'Youth Camp Registration', content: 'Summer youth camp registration is now open! Early bird pricing available until March 1st. Space is limited so sign up today.', category: 'ministry', priority: 'normal', published_at: '2026-02-05T09:00:00', requires_ack: false, image: null },
-  { id: '4', title: 'New Small Group Season', content: 'Our spring small group season launches March 3rd. Browse available groups and sign up in the Groups tab.', category: 'church_wide', priority: 'normal', published_at: '2026-02-04T11:00:00', requires_ack: false, image: null },
-];
 
 const CATEGORIES = [
   { key: 'all', label: 'All' },
@@ -47,10 +42,20 @@ export default function AnnouncementsScreen() {
   const router = useRouter();
   const [activeCategory, setActiveCategory] = useState('all');
   const [acknowledged, setAcknowledged] = useState<Set<string>>(new Set());
+  const [announcements, setAnnouncements] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const loadAnnouncements = useCallback(async () => {
+    try {
+      const data = await announcementsAPI.getAll().catch(() => null);
+      if (data) setAnnouncements(data);
+    } catch (_) {} finally { setLoading(false); }
+  }, []);
+  useEffect(() => { loadAnnouncements(); }, [loadAnnouncements]);
 
   const filtered = activeCategory === 'all'
-    ? MOCK_ANNOUNCEMENTS
-    : MOCK_ANNOUNCEMENTS.filter((a) => a.category === activeCategory);
+    ? announcements
+    : announcements.filter((a: any) => a.category === activeCategory);
 
   const handleAck = (id: string) => {
     setAcknowledged((prev) => {

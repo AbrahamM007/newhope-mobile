@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,24 +8,15 @@ import {
   Image,
   Modal,
   Dimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Play, Pause, X, Clock, User, BookOpen, Radio } from 'lucide-react-native';
 import theme from '@/lib/theme';
+import { mediaAPI } from '@/lib/api';
 
 const { width } = Dimensions.get('window');
 const CARD_WIDTH = (width - 48) / 2;
-
-const MOCK_SERIES = ['All', 'Walking in Faith', 'The Kingdom', 'Grace Abounds', 'Rooted'];
-
-const MOCK_SERMONS = [
-  { id: '1', title: 'Walking in Faith - Part 3', speaker: 'Pastor John Doe', series: 'Walking in Faith', date: '2026-02-09', duration: 2100, thumbnail: 'https://images.pexels.com/photos/2351722/pexels-photo-2351722.jpeg?auto=compress&cs=tinysrgb&w=400', scripture: 'Hebrews 11:1-6' },
-  { id: '2', title: 'The Kingdom Within', speaker: 'Pastor Sarah Lee', series: 'The Kingdom', date: '2026-02-02', duration: 1800, thumbnail: 'https://images.pexels.com/photos/2774556/pexels-photo-2774556.jpeg?auto=compress&cs=tinysrgb&w=400', scripture: 'Luke 17:20-21' },
-  { id: '3', title: 'Grace That Transforms', speaker: 'Pastor John Doe', series: 'Grace Abounds', date: '2026-01-26', duration: 2400, thumbnail: 'https://images.pexels.com/photos/1157557/pexels-photo-1157557.jpeg?auto=compress&cs=tinysrgb&w=400', scripture: 'Ephesians 2:8-10' },
-  { id: '4', title: 'Walking in Faith - Part 2', speaker: 'Pastor John Doe', series: 'Walking in Faith', date: '2026-01-19', duration: 1950, thumbnail: 'https://images.pexels.com/photos/3825527/pexels-photo-3825527.jpeg?auto=compress&cs=tinysrgb&w=400', scripture: 'James 2:14-26' },
-  { id: '5', title: 'Rooted in Love', speaker: 'Pastor Mike Chen', series: 'Rooted', date: '2026-01-12', duration: 2200, thumbnail: 'https://images.pexels.com/photos/2559941/pexels-photo-2559941.jpeg?auto=compress&cs=tinysrgb&w=400', scripture: 'Colossians 2:6-7' },
-  { id: '6', title: 'Kingdom Economics', speaker: 'Pastor Sarah Lee', series: 'The Kingdom', date: '2026-01-05', duration: 1700, thumbnail: 'https://images.pexels.com/photos/2608517/pexels-photo-2608517.jpeg?auto=compress&cs=tinysrgb&w=400', scripture: 'Matthew 6:25-34' },
-];
 
 const MEDIA_TABS = ['Sermons', 'Devotionals', 'Podcasts'];
 const SPEEDS = ['0.5x', '1x', '1.5x', '2x'];
@@ -35,18 +26,47 @@ const formatDuration = (seconds: number) => `${Math.round(seconds / 60)} min`;
 export default function MediaScreen() {
   const [activeTab, setActiveTab] = useState('Sermons');
   const [activeSeries, setActiveSeries] = useState('All');
-  const [selectedSermon, setSelectedSermon] = useState<typeof MOCK_SERMONS[0] | null>(null);
+  const [selectedSermon, setSelectedSermon] = useState<any>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [speed, setSpeed] = useState('1x');
+  const [sermons, setSermons] = useState<any[]>([]);
+  const [seriesFilters, setSeriesFilters] = useState<string[]>(['All']);
+  const [loading, setLoading] = useState(true);
   const isLive = true;
 
-  const filtered = activeSeries === 'All'
-    ? MOCK_SERMONS
-    : MOCK_SERMONS.filter((s) => s.series === activeSeries);
+  const loadData = useCallback(async () => {
+    try {
+      const [mediaData, seriesData] = await Promise.all([
+        mediaAPI.getAll().catch(() => null),
+        mediaAPI.getSeries().catch(() => null),
+      ]);
+      if (mediaData) setSermons(mediaData);
+      if (seriesData) {
+        const names = seriesData.map((s: any) => s.name || s.title).filter(Boolean);
+        setSeriesFilters(['All', ...names]);
+      }
+    } catch (_) {} finally { setLoading(false); }
+  }, []);
+  useEffect(() => { loadData(); }, [loadData]);
+
+  const filtered = activeSeries === 'All' ? sermons : sermons.filter((s: any) => s.series === activeSeries);
 
   const hero = filtered[0];
   const grid = filtered.slice(1);
-  const related = MOCK_SERMONS.filter((s) => s.id !== selectedSermon?.id).slice(0, 2);
+  const related = sermons.filter((s: any) => s.id !== selectedSermon?.id).slice(0, 2);
+
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Media</Text>
+        </View>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={theme.colors.brandGreen} />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -77,7 +97,7 @@ export default function MediaScreen() {
         </ScrollView>
 
         <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chips} contentContainerStyle={styles.chipsContent}>
-          {MOCK_SERIES.map((s) => (
+          {seriesFilters.map((s) => (
             <TouchableOpacity key={s} style={[styles.chip, activeSeries === s && styles.chipActive]} onPress={() => setActiveSeries(s)}>
               <Text style={[styles.chipText, activeSeries === s && styles.chipTextActive]}>{s}</Text>
             </TouchableOpacity>

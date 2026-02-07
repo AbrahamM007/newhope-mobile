@@ -1,22 +1,31 @@
-import React from 'react';
-import { View, Text, StyleSheet, FlatList, TouchableOpacity } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ArrowLeft, Calendar, Clock, CheckCircle, CircleDashed, Filter } from 'lucide-react-native';
 import theme from '@/lib/theme';
-import { MOCK_SERVICES } from '@/lib/mocks/groups';
+import { worshipAPI } from '@/lib/api';
 import { LinearGradient } from 'expo-linear-gradient';
 
 export default function WorshipPlanningScreen() {
     const { id } = useLocalSearchParams();
     const router = useRouter();
+    const [services, setServices] = useState<any[]>([]);
+    const [loading, setLoading] = useState(true);
+
+    const loadServices = useCallback(async () => {
+        try {
+            const data = await worshipAPI.getAll(true).catch(() => null);
+            if (data) setServices(data);
+        } catch (_) {} finally { setLoading(false); }
+    }, []);
+    useEffect(() => { loadServices(); }, [loadServices]);
 
     const handleServicePress = (serviceId: string) => {
-        // Navigate to Plan Editor
         router.push(`/groups/${id}/planning/${serviceId}` as any);
     };
 
-    const renderService = ({ item }: { item: typeof MOCK_SERVICES[0] }) => {
+    const renderService = ({ item }: { item: any }) => {
         const isConfirmed = item.status === 'Confirmed';
 
         return (
@@ -70,7 +79,7 @@ export default function WorshipPlanningScreen() {
                 </View>
 
                 <FlatList
-                    data={MOCK_SERVICES}
+                    data={services}
                     renderItem={renderService}
                     keyExtractor={(item) => item.id}
                     contentContainerStyle={styles.list}

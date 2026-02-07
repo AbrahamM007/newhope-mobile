@@ -8,10 +8,11 @@ import {
   RefreshControl,
   Image,
   Dimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/context/AuthContext';
-import { eventsAPI, servicesAPI, servingAPI } from '@/lib/api';
+import { eventsAPI, servicesAPI, servingAPI, announcementsAPI } from '@/lib/api';
 import { useRouter } from 'expo-router';
 import theme from '@/lib/theme';
 import { StatusBar } from 'expo-status-bar';
@@ -31,20 +32,6 @@ import {
 } from 'lucide-react-native';
 
 const { width } = Dimensions.get('window');
-
-const MOCK_ANNOUNCEMENTS = [
-  { id: '1', title: 'Easter Services Schedule', content: 'Join us for our special Easter celebration services...', category: 'church_wide' },
-  { id: '2', title: 'Youth Camp Registration Open', content: 'Register your teens for summer camp...', category: 'ministry' },
-  { id: '3', title: 'New Volunteer Orientation', content: 'Interested in serving? Join our orientation...', category: 'volunteers' },
-];
-
-const MOCK_EVENTS = [
-  { id: '1', title: 'Worship Night', start_time: '2026-02-15T19:00:00', location: 'Main Campus', category: 'worship' },
-  { id: '2', title: 'Youth Rally', start_time: '2026-02-18T18:00:00', location: 'Youth Center', category: 'youth' },
-  { id: '3', title: 'Community Service Day', start_time: '2026-02-22T09:00:00', location: 'City Park', category: 'outreach' },
-];
-
-const MOCK_SERVING = { date: 'Feb 16', role: 'Acoustic Guitar', service: 'Sunday 9AM', status: 'pending' };
 
 const CATEGORY_COLORS: Record<string, string> = {
   church_wide: '#2563EB', ministry: '#7C3AED', volunteers: theme.colors.brandGreen,
@@ -75,18 +62,21 @@ export default function HomeScreen() {
   const { user } = useAuth();
   const router = useRouter();
   const [refreshing, setRefreshing] = useState(false);
-  const [events, setEvents] = useState(MOCK_EVENTS);
-  const [serving, setServing] = useState<typeof MOCK_SERVING | null>(MOCK_SERVING);
-  const [announcements] = useState(MOCK_ANNOUNCEMENTS);
+  const [events, setEvents] = useState([]);
+  const [serving, setServing] = useState<any>(null);
+  const [announcements, setAnnouncements] = useState<any[]>([]);
 
   const loadData = useCallback(async () => {
     try {
-      const [evData] = await Promise.all([
+      const [evData, , schedData, annData] = await Promise.all([
         eventsAPI.getUpcoming(3).catch(() => null),
         servicesAPI.getAll().catch(() => null),
         servingAPI.getMySchedule(true).catch(() => null),
+        announcementsAPI.getAll().catch(() => null),
       ]);
       if (evData?.length) setEvents(evData);
+      if (schedData?.length) setServing(schedData[0]);
+      if (annData?.length) setAnnouncements(annData.slice(0, 3));
     } catch (_) {}
   }, []);
 

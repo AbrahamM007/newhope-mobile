@@ -1,18 +1,11 @@
-import React, { useState } from 'react';
-import { View, Text, TouchableOpacity, TextInput, FlatList, ScrollView, Modal, Switch, StyleSheet, SafeAreaView } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, TouchableOpacity, TextInput, FlatList, ScrollView, Modal, Switch, StyleSheet, SafeAreaView, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ArrowLeft, Plus, Hand, X, AlertTriangle, MessageSquare, Globe, Lock, Users, Eye } from 'lucide-react-native';
+import { prayerAPI } from '@/lib/api';
 
 const brandGreen = '#15803d';
 const brandDark = '#1a1a1a';
-
-const MOCK_PRAYERS = [
-  { id: '1', author: 'Maria Santos', content: 'Please pray for my mother who is undergoing surgery next week. We trust God for a successful procedure and quick recovery.', category: 'health', is_urgent: true, is_anonymous: false, prayed_count: 34, updates: 2, created_at: new Date(Date.now() - 7200000).toISOString() },
-  { id: '2', author: 'Anonymous', content: 'Going through a difficult season in my marriage. Please pray for restoration and healing in our relationship.', category: 'family', is_urgent: false, is_anonymous: true, prayed_count: 28, updates: 0, created_at: new Date(Date.now() - 14400000).toISOString() },
-  { id: '3', author: 'James Wilson', content: 'Praise report! After months of searching, God opened a door for a new job that perfectly fits my skills and calling!', category: 'praise', is_urgent: false, is_anonymous: false, prayed_count: 45, updates: 1, created_at: new Date(Date.now() - 28800000).toISOString() },
-  { id: '4', author: 'Lisa Park', content: 'Praying for our youth group as they prepare for the winter retreat. May God move powerfully in their hearts.', category: 'spiritual', is_urgent: false, is_anonymous: false, prayed_count: 19, updates: 0, created_at: new Date(Date.now() - 43200000).toISOString() },
-  { id: '5', author: 'Robert Kim', content: 'Please pray for wisdom as I navigate a career transition. Trusting God for direction and provision.', category: 'work', is_urgent: false, is_anonymous: false, prayed_count: 22, updates: 1, created_at: new Date(Date.now() - 86400000).toISOString() },
-];
 
 const TABS = ['All Requests', 'My Prayers', 'Urgent', 'Praise Reports'];
 const PRAYER_CATEGORIES = ['Health', 'Family', 'Work', 'Spiritual', 'Other'];
@@ -38,7 +31,8 @@ const getTimeAgo = (dateStr: string) => {
 export default function PrayerScreen() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('All Requests');
-  const [prayers, setPrayers] = useState(MOCK_PRAYERS);
+  const [prayers, setPrayers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const [prayedIds, setPrayedIds] = useState<string[]>([]);
   const [modalVisible, setModalVisible] = useState(false);
   const [newContent, setNewContent] = useState('');
@@ -46,6 +40,14 @@ export default function PrayerScreen() {
   const [newPrivacy, setNewPrivacy] = useState('public');
   const [isAnonymous, setIsAnonymous] = useState(false);
   const [isUrgent, setIsUrgent] = useState(false);
+
+  const loadPrayers = useCallback(async () => {
+    try {
+      const data = await prayerAPI.getAll().catch(() => null);
+      if (data) setPrayers(data);
+    } catch (_) {} finally { setLoading(false); }
+  }, []);
+  useEffect(() => { loadPrayers(); }, [loadPrayers]);
 
   const totalPraying = prayers.reduce((s, p) => s + p.prayed_count, 0);
   const filteredPrayers = prayers.filter((p) => {
@@ -61,8 +63,11 @@ export default function PrayerScreen() {
     setPrayers((prev) => prev.map((p) => (p.id === id ? { ...p, prayed_count: p.prayed_count + 1 } : p)));
   };
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (!newContent.trim()) return;
+    try {
+      await prayerAPI.create({ content: newContent.trim(), category: newCategory.toLowerCase(), isAnonymous, isUrgent, privacy: newPrivacy });
+    } catch (_) {}
     setPrayers((prev) => [{ id: String(Date.now()), author: isAnonymous ? 'Anonymous' : 'You', content: newContent.trim(), category: newCategory.toLowerCase(), is_urgent: isUrgent, is_anonymous: isAnonymous, prayed_count: 0, updates: 0, created_at: new Date().toISOString() }, ...prev]);
     setNewContent(''); setNewCategory('Health'); setNewPrivacy('public'); setIsAnonymous(false); setIsUrgent(false); setModalVisible(false);
   };

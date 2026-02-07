@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,20 +10,14 @@ import {
   StyleSheet,
   SafeAreaView,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ArrowLeft, SlidersHorizontal, Search, MapPin, Clock, Users, CalendarPlus, Check } from 'lucide-react-native';
+import { eventsFullAPI } from '@/lib/api';
 
 const brandGreen = '#15803d';
 const brandDark = '#1a1a1a';
-
-const MOCK_EVENTS = [
-  { id: '1', title: 'Worship Night', start_time: '2026-02-15T19:00:00', end_time: '2026-02-15T21:00:00', location: 'Main Auditorium', category: 'worship', image: 'https://images.pexels.com/photos/2747449/pexels-photo-2747449.jpeg?auto=compress&cs=tinysrgb&w=600', rsvp_count: 145, isGoing: false },
-  { id: '2', title: 'Youth Rally', start_time: '2026-02-18T18:00:00', end_time: '2026-02-18T20:30:00', location: 'Youth Center', category: 'youth', image: 'https://images.pexels.com/photos/1157557/pexels-photo-1157557.jpeg?auto=compress&cs=tinysrgb&w=600', rsvp_count: 82, isGoing: true },
-  { id: '3', title: 'Community Service Day', start_time: '2026-02-22T09:00:00', end_time: '2026-02-22T14:00:00', location: 'City Park', category: 'outreach', image: 'https://images.pexels.com/photos/6646918/pexels-photo-6646918.jpeg?auto=compress&cs=tinysrgb&w=600', rsvp_count: 56, isGoing: false },
-  { id: '4', title: 'Marriage Conference', start_time: '2026-03-01T09:00:00', end_time: '2026-03-01T17:00:00', location: 'Conference Center', category: 'conference', image: 'https://images.pexels.com/photos/2253870/pexels-photo-2253870.jpeg?auto=compress&cs=tinysrgb&w=600', rsvp_count: 200, isGoing: false },
-  { id: '5', title: 'Kids Fun Day', start_time: '2026-03-08T10:00:00', end_time: '2026-03-08T13:00:00', location: 'Kids Wing', category: 'community', image: 'https://images.pexels.com/photos/1001914/pexels-photo-1001914.jpeg?auto=compress&cs=tinysrgb&w=600', rsvp_count: 75, isGoing: false },
-];
 
 const CATEGORIES = ['All', 'Worship', 'Youth', 'Outreach', 'Community', 'Conference'];
 
@@ -51,7 +45,16 @@ export default function EventsScreen() {
   const router = useRouter();
   const [activeCategory, setActiveCategory] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
-  const [events, setEvents] = useState(MOCK_EVENTS);
+  const [events, setEvents] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const loadEvents = useCallback(async () => {
+    try {
+      const data = await eventsFullAPI.getAll(true).catch(() => null);
+      if (data) setEvents(data);
+    } catch (_) {} finally { setLoading(false); }
+  }, []);
+  useEffect(() => { loadEvents(); }, [loadEvents]);
 
   const filteredEvents = events.filter((e) => {
     const matchCategory = activeCategory === 'All' || e.category === activeCategory.toLowerCase();
@@ -73,7 +76,7 @@ export default function EventsScreen() {
     Alert.alert('Add to Calendar', `"${title}" would be added to your device calendar.`);
   };
 
-  const renderEventCard = ({ item }: { item: typeof MOCK_EVENTS[0] }) => {
+  const renderEventCard = ({ item }: { item: any }) => {
     const { month, day } = formatDate(item.start_time);
     const catColor = CATEGORY_COLORS[item.category] || '#6b7280';
 

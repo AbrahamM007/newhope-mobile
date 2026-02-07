@@ -1,27 +1,10 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, FlatList, Image, Modal, TextInput, KeyboardAvoidingView, Platform, RefreshControl } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, FlatList, Image, Modal, TextInput, KeyboardAvoidingView, Platform, RefreshControl, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Heart, MessageCircle, Share2, Bookmark, Plus, X, Send, BookOpen, Camera, Type, HandHeart, BarChart3 } from 'lucide-react-native';
 import theme from '@/lib/theme';
-import { postsAPI } from '@/lib/api';
+import { postsAPI, storiesAPI } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
-
-const MOCK_STORIES = [
-  { id: 'add', name: 'Your Story', isAdd: true },
-  { id: '1', name: 'Sarah J.', avatar: null, hasNew: true },
-  { id: '2', name: 'Pastor Mike', avatar: null, hasNew: true },
-  { id: '3', name: 'Worship', avatar: null, hasNew: false },
-  { id: '4', name: 'Youth', avatar: null, hasNew: true },
-  { id: '5', name: 'Maria L.', avatar: null, hasNew: false },
-];
-
-const MOCK_POSTS = [
-  { id: '1', author: { firstName: 'Sarah', lastName: 'Johnson' }, post_type: 'testimony', scope: 'PUBLIC_CHURCH', content: 'God has been so faithful this week! I got the job I had been praying about for months. Never stop believing!', like_count: 24, comment_count: 8, created_at: new Date(Date.now() - 3600000).toISOString() },
-  { id: '2', author: { firstName: 'Pastor', lastName: 'Mike' }, post_type: 'scripture', scope: 'PUBLIC_CHURCH', content: '\u201CFor I know the plans I have for you,\u201D declares the Lord, \u201Cplans to prosper you and not to harm you, plans to give you hope and a future.\u201D', scripture_ref: 'Jeremiah 29:11', like_count: 56, comment_count: 12, created_at: new Date(Date.now() - 7200000).toISOString() },
-  { id: '3', author: { firstName: 'David', lastName: 'Lee' }, post_type: 'text', scope: 'PUBLIC_CHURCH', content: 'Amazing worship service this morning! The presence of God was so strong. Who else felt that?', like_count: 42, comment_count: 15, created_at: new Date(Date.now() - 14400000).toISOString() },
-  { id: '4', author: { firstName: 'Emily', lastName: 'Chen' }, post_type: 'prayer_request', scope: 'PUBLIC_CHURCH', content: 'Please pray for my grandmother who is in the hospital. She has been struggling with her health for the past few weeks.', like_count: 31, comment_count: 22, created_at: new Date(Date.now() - 28800000).toISOString() },
-  { id: '5', author: { firstName: 'Youth', lastName: 'Ministry' }, post_type: 'text', scope: 'MINISTRY', content: 'Youth Rally this Friday at 7PM! Bring a friend and get ready for an awesome night of worship and games!', like_count: 18, comment_count: 5, created_at: new Date(Date.now() - 43200000).toISOString(), media_urls: ['https://images.pexels.com/photos/1157557/pexels-photo-1157557.jpeg?auto=compress&cs=tinysrgb&w=600'] },
-];
 
 const FEED_TABS = ['For You', 'Church', 'My Groups', 'Ministry'];
 const POST_TYPES = [
@@ -52,20 +35,34 @@ const timeAgo = (d: string) => {
 const initials = (f: string, l: string) => `${f[0]}${l[0]}`.toUpperCase();
 const scopeText = (s: string) => s === 'MINISTRY' ? 'Ministry' : s === 'PUBLIC_CHURCH' ? 'Church' : s;
 
-type Story = (typeof MOCK_STORIES)[0];
-type Post = (typeof MOCK_POSTS)[0];
+type Story = { id: string; name: string; isAdd?: boolean; avatar?: any; hasNew?: boolean };
+type Post = any;
 
 export default function SocialScreen() {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('For You');
-  const [posts] = useState(MOCK_POSTS);
+  const [posts, setPosts] = useState<any[]>([]);
+  const [stories, setStories] = useState<any[]>([{ id: 'add', name: 'Your Story', isAdd: true }]);
   const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [liked, setLiked] = useState<Set<string>>(new Set());
   const [saved, setSaved] = useState<Set<string>>(new Set());
   const [showModal, setShowModal] = useState(false);
   const [content, setContent] = useState('');
   const [postType, setPostType] = useState('text');
   const [scope, setScope] = useState('Church');
+
+  const loadData = useCallback(async () => {
+    try {
+      const [postsData, storiesData] = await Promise.all([
+        postsAPI.getAll().catch(() => null),
+        storiesAPI.getAll().catch(() => null),
+      ]);
+      if (postsData) setPosts(postsData);
+      if (storiesData) setStories([{ id: 'add', name: 'Your Story', isAdd: true }, ...storiesData]);
+    } catch (_) {} finally { setLoading(false); }
+  }, []);
+  useEffect(() => { loadData(); }, [loadData]);
 
   const toggle = (set: Set<string>, id: string) => {
     const n = new Set(set);
@@ -79,6 +76,19 @@ export default function SocialScreen() {
     setContent('');
     setShowModal(false);
   };
+
+  if (loading) {
+    return (
+      <View style={s.container}>
+        <SafeAreaView edges={['top']} style={s.flex}>
+          <View style={s.header}><Text style={s.title}>Social</Text></View>
+          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+            <ActivityIndicator size="large" color={theme.colors.brandGreen} />
+          </View>
+        </SafeAreaView>
+      </View>
+    );
+  }
 
   const renderStory = ({ item }: { item: Story }) => (
     <TouchableOpacity style={s.storyItem} activeOpacity={0.7}>
@@ -133,7 +143,7 @@ export default function SocialScreen() {
 
   const Header = () => (
     <View>
-      <FlatList data={MOCK_STORIES} renderItem={renderStory} keyExtractor={i => i.id} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.stories} />
+      <FlatList data={stories} renderItem={renderStory} keyExtractor={i => i.id} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.stories} />
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.tabs}>
         {FEED_TABS.map(t => (
           <TouchableOpacity key={t} style={[s.chip, activeTab === t && s.chipOn]} onPress={() => setActiveTab(t)}>
@@ -148,7 +158,7 @@ export default function SocialScreen() {
     <View style={s.container}>
       <SafeAreaView edges={['top']} style={s.flex}>
         <View style={s.header}><Text style={s.title}>Social</Text></View>
-        <FlatList data={posts} renderItem={renderPost} keyExtractor={p => p.id} ListHeaderComponent={Header} contentContainerStyle={s.feed} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); setTimeout(() => setRefreshing(false), 1000); }} tintColor={theme.colors.brandGreen} />} />
+        <FlatList data={posts} renderItem={renderPost} keyExtractor={p => p.id} ListHeaderComponent={Header} ListEmptyComponent={!loading && posts.length === 0 ? <View style={{ alignItems: 'center', paddingTop: 60 }}><Text style={{ fontSize: 16, fontWeight: '600', color: theme.colors.gray500 }}>No posts yet</Text></View> : null} contentContainerStyle={s.feed} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadData().then(() => setRefreshing(false)); }} tintColor={theme.colors.brandGreen} />} />
         <TouchableOpacity style={s.fab} activeOpacity={0.85} onPress={() => setShowModal(true)}><Plus size={28} color="#fff" /></TouchableOpacity>
       </SafeAreaView>
       <Modal visible={showModal} animationType="slide" transparent>

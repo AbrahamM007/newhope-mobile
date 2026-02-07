@@ -1,25 +1,9 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Calendar, Clock, Check, X, Music, Users, Heart, Plus, FileText, MapPin, Award, ChevronRight, Play } from 'lucide-react-native';
 import theme from '@/lib/theme';
-
-const MOCK_SCHEDULE = [
-  { id: '1', date: '2026-02-16', service: 'Sunday 9AM', role: 'Acoustic Guitar', status: 'pending', location: 'Main Auditorium' },
-  { id: '2', date: '2026-02-16', service: 'Sunday 11AM', role: 'Acoustic Guitar', status: 'confirmed', location: 'Main Auditorium' },
-  { id: '3', date: '2026-02-23', service: 'Sunday 9AM', role: 'Worship Leader', status: 'pending', location: 'Main Auditorium' },
-];
-const MOCK_SERVICES = [
-  { id: '1', title: 'Sunday Service', date: '2026-02-16', time: '9:00 AM', series: 'Walking in Faith', status: 'confirmed', songs: 4, team: 8, files: 3 },
-  { id: '2', title: 'Sunday Service', date: '2026-02-16', time: '11:00 AM', series: 'Walking in Faith', status: 'draft', songs: 4, team: 6, files: 2 },
-  { id: '3', title: 'Wednesday Night', date: '2026-02-19', time: '7:00 PM', series: 'Prayer & Worship', status: 'draft', songs: 3, team: 5, files: 1 },
-];
-const MOCK_TRAINING = [
-  { id: '1', title: 'Volunteer Orientation', description: 'Introduction to serving at NewHope', duration: 30, completed: true },
-  { id: '2', title: 'Safety & Security', description: 'Emergency procedures and child safety', duration: 20, completed: true },
-  { id: '3', title: 'Worship Team Standards', description: 'Musical and spiritual preparation guidelines', duration: 25, completed: false },
-  { id: '4', title: 'Tech & Production', description: 'Sound, lighting, and media basics', duration: 45, completed: false },
-];
+import { servingAPI, worshipAPI, trainingAPI } from '@/lib/api';
 
 type SubTab = 'schedule' | 'services' | 'training';
 const fmtMonth = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('en-US', { month: 'short' }).toUpperCase();
@@ -30,14 +14,41 @@ const svcBg = (s: string) => s === 'confirmed' ? '#ecfdf5' : s === 'live' ? '#ef
 
 export default function ServeScreen() {
   const [activeTab, setActiveTab] = useState<SubTab>('schedule');
-  const [schedule, setSchedule] = useState(MOCK_SCHEDULE);
-  const [selectedService, setSelectedService] = useState<typeof MOCK_SERVICES[0] | null>(null);
+  const [schedule, setSchedule] = useState<any[]>([]);
+  const [services, setServices] = useState<any[]>([]);
+  const [training, setTraining] = useState<any[]>([]);
+  const [selectedService, setSelectedService] = useState<any>(null);
   const [detailTab, setDetailTab] = useState<'setlist' | 'team' | 'runsheet'>('setlist');
-  const done = MOCK_TRAINING.filter(t => t.completed).length;
-  const total = MOCK_TRAINING.length;
+  const [loading, setLoading] = useState(true);
+  const done = training.filter((t: any) => t.completed).length;
+  const total = training.length || 1;
   const tabs: { key: SubTab; label: string }[] = [
     { key: 'schedule', label: 'My Schedule' }, { key: 'services', label: 'Services' }, { key: 'training', label: 'Training' },
   ];
+
+  const loadData = useCallback(async () => {
+    try {
+      const [schedData, svcData, trainData] = await Promise.all([
+        servingAPI.getMySchedule(true).catch(() => null),
+        worshipAPI.getAll(true).catch(() => null),
+        trainingAPI.getModules().catch(() => null),
+      ]);
+      if (schedData) setSchedule(schedData);
+      if (svcData) setServices(svcData);
+      if (trainData) setTraining(trainData);
+    } catch (_) {} finally { setLoading(false); }
+  }, []);
+  useEffect(() => { loadData(); }, [loadData]);
+
+  if (loading) {
+    return (
+      <SafeAreaView style={s.container}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={theme.colors.brandGreen} />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={s.container}>
@@ -87,7 +98,7 @@ export default function ServeScreen() {
             </View>
           )))}
           {activeTab === 'services' && (<>
-            {MOCK_SERVICES.map(svc => (
+            {services.map(svc => (
               <TouchableOpacity key={svc.id} style={s.svcCard} onPress={() => { setSelectedService(svc); setDetailTab('setlist'); }} activeOpacity={0.7}>
                 <View style={s.svcTop}>
                   <View style={s.svcLeft}>
@@ -113,9 +124,9 @@ export default function ServeScreen() {
             <View style={s.progCard}>
               <View style={s.progHead}><Text style={s.progTitle}>Your Progress</Text><Text style={s.progCount}>{done}/{total} modules</Text></View>
               <View style={s.progBg}><View style={[s.progFill, { width: `${(done / total) * 100}%` }]} /></View>
-              {done === total && <View style={s.allDone}><Award size={16} color={theme.colors.brandGreen} /><Text style={s.allDoneTxt}>All modules completed!</Text></View>}
+              {done === total && training.length > 0 && <View style={s.allDone}><Award size={16} color={theme.colors.brandGreen} /><Text style={s.allDoneTxt}>All modules completed!</Text></View>}
             </View>
-            {MOCK_TRAINING.map(mod => (
+            {training.map(mod => (
               <View key={mod.id} style={s.trCard}>
                 <View style={[s.trIcon, mod.completed && s.trIconDone]}>
                   {mod.completed ? <Check size={18} color={theme.colors.white} /> : <Play size={18} color={theme.colors.brandGreen} />}

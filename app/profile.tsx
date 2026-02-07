@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,21 +6,17 @@ import {
   TouchableOpacity,
   Switch,
   StyleSheet,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { ArrowLeft, Edit2, ChevronRight, LogOut, Lock, Users } from 'lucide-react-native';
 import { colors } from '@/lib/theme';
 import { useAuth } from '@/context/AuthContext';
+import { profileAPI } from '@/lib/api';
 
 const brandGreen = colors.brandGreen;
 const brandDark = colors.brandDark;
-
-const MOCK_HOUSEHOLD = [
-  { name: 'John Doe', relationship: 'Head', avatar: null },
-  { name: 'Jane Doe', relationship: 'Spouse', avatar: null },
-  { name: 'Jake Doe', relationship: 'Child', avatar: null },
-];
 
 const AVATAR_BG = '#86efac';
 
@@ -36,12 +32,21 @@ export default function ProfileScreen() {
   const memberSince = 'January 2020';
   const initials = displayName.split(' ').map((n: string) => n[0]).join('').toUpperCase();
 
+  const [household, setHousehold] = useState<any[]>([]);
   const [notifications, setNotifications] = useState({
     social: true, serve: true, groups: true, announcements: true, prayer: false, messages: true,
   });
   const [privacy, setPrivacy] = useState({
     profileVisible: true, phoneVisible: false, emailVisible: true, discoverable: true,
   });
+
+  const loadHousehold = useCallback(async () => {
+    try {
+      const data = await profileAPI.getHousehold().catch(() => null);
+      if (data) setHousehold(data);
+    } catch (_) {}
+  }, []);
+  useEffect(() => { loadHousehold(); }, [loadHousehold]);
 
   const toggleNotif = (key: keyof typeof notifications) =>
     setNotifications((p) => ({ ...p, [key]: !p[key] }));
@@ -105,7 +110,7 @@ export default function ProfileScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Household</Text>
           <View style={styles.infoCard}>
-            {MOCK_HOUSEHOLD.map((h, i) => (
+            {household.map((h: any, i: number) => (
               <View key={h.name}>
                 <View style={styles.householdRow}>
                   <View style={styles.avatarSm}>
@@ -116,7 +121,7 @@ export default function ProfileScreen() {
                     <Text style={styles.householdRelation}>{h.relationship}</Text>
                   </View>
                 </View>
-                {i < MOCK_HOUSEHOLD.length - 1 && <View style={styles.divider} />}
+                {i < household.length - 1 && <View style={styles.divider} />}
               </View>
             ))}
             <TouchableOpacity style={styles.manageHousehold}>

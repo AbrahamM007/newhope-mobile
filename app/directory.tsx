@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -7,27 +7,16 @@ import {
   TextInput,
   FlatList,
   StyleSheet,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { ArrowLeft, Search, MessageCircle, ChevronDown } from 'lucide-react-native';
 import { colors } from '@/lib/theme';
+import { directoryAPI } from '@/lib/api';
 
 const brandGreen = colors.brandGreen;
 const brandDark = colors.brandDark;
-
-const MOCK_MEMBERS = [
-  { id: '1', firstName: 'Sarah', lastName: 'Johnson', campus: 'Main Campus', ministry: 'Worship', avatar: null },
-  { id: '2', firstName: 'Mike', lastName: 'Chen', campus: 'Main Campus', ministry: 'Youth', avatar: null },
-  { id: '3', firstName: 'Emily', lastName: 'Davis', campus: 'West Campus', ministry: 'Kids', avatar: null },
-  { id: '4', firstName: 'David', lastName: 'Lee', campus: 'Main Campus', ministry: 'Production', avatar: null },
-  { id: '5', firstName: 'Maria', lastName: 'Santos', campus: 'Main Campus', ministry: null, avatar: null },
-  { id: '6', firstName: 'James', lastName: 'Wilson', campus: 'West Campus', ministry: 'Ushers', avatar: null },
-  { id: '7', firstName: 'Lisa', lastName: 'Park', campus: 'Main Campus', ministry: 'Worship', avatar: null },
-  { id: '8', firstName: 'Robert', lastName: 'Kim', campus: 'North Campus', ministry: null, avatar: null },
-  { id: '9', firstName: 'Anna', lastName: 'Thompson', campus: 'Main Campus', ministry: 'Creative Arts', avatar: null },
-  { id: '10', firstName: 'Chris', lastName: 'Brown', campus: 'West Campus', ministry: 'Small Groups', avatar: null },
-];
 
 const AVATAR_COLORS = ['#fca5a5', '#fdba74', '#fcd34d', '#86efac', '#93c5fd', '#c4b5fd', '#f9a8d4', '#a5b4fc'];
 
@@ -53,26 +42,36 @@ export default function DirectoryScreen() {
   const [selectedMinistry, setSelectedMinistry] = useState('All Ministries');
   const [showCampusFilter, setShowCampusFilter] = useState(false);
   const [showMinistryFilter, setShowMinistryFilter] = useState(false);
+  const [members, setMembers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const loadMembers = useCallback(async () => {
+    try {
+      const data = await directoryAPI.search().catch(() => null);
+      if (data) setMembers(data);
+    } catch (_) {} finally { setLoading(false); }
+  }, []);
+  useEffect(() => { loadMembers(); }, [loadMembers]);
 
   const filteredMembers = useMemo(() => {
-    let members = [...MOCK_MEMBERS];
+    let membersList = [...members];
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
-      members = members.filter(
+      membersList = membersList.filter(
         (m) => m.firstName.toLowerCase().includes(q) || m.lastName.toLowerCase().includes(q)
       );
     }
     if (selectedCampus !== 'All Campuses') {
-      members = members.filter((m) => m.campus === selectedCampus);
+      membersList = membersList.filter((m) => m.campus === selectedCampus);
     }
     if (selectedMinistry !== 'All Ministries') {
-      members = members.filter((m) => m.ministry === selectedMinistry);
+      membersList = membersList.filter((m) => m.ministry === selectedMinistry);
     }
-    members.sort((a, b) => a.lastName.localeCompare(b.lastName));
-    return members;
-  }, [searchQuery, selectedCampus, selectedMinistry]);
+    membersList.sort((a, b) => a.lastName.localeCompare(b.lastName));
+    return membersList;
+  }, [searchQuery, selectedCampus, selectedMinistry, members]);
 
-  const renderMember = ({ item }: { item: typeof MOCK_MEMBERS[0] }) => {
+  const renderMember = ({ item }: { item: any }) => {
     const fullName = `${item.firstName} ${item.lastName}`;
     const color = getAvatarColor(fullName);
     return (

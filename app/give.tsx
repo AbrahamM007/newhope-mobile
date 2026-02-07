@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -8,22 +8,18 @@ import {
   Switch,
   StyleSheet,
   Dimensions,
+  ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { ArrowLeft, Heart, ChevronDown } from 'lucide-react-native';
 import { colors } from '@/lib/theme';
+import { givingAPI } from '@/lib/api';
 
 const brandGreen = colors.brandGreen;
 const brandDark = colors.brandDark;
 
 const { width } = Dimensions.get('window');
-
-const MOCK_CAMPAIGNS = [
-  { id: '1', name: 'General Fund', description: 'Support the day-to-day ministry', goal: 50000, current: 35000, image: null },
-  { id: '2', name: 'Building Fund', description: 'New worship center expansion', goal: 500000, current: 320000, image: null },
-  { id: '3', name: 'Missions', description: 'Global outreach initiatives', goal: 25000, current: 18500, image: null },
-];
 
 const QUICK_AMOUNTS = [25, 50, 100, 250, 500];
 const FUNDS = ['General Fund', 'Missions', 'Youth Ministry', 'Building Fund'];
@@ -36,6 +32,16 @@ export default function GiveScreen() {
   const [selectedFund, setSelectedFund] = useState('General Fund');
   const [isRecurring, setIsRecurring] = useState(false);
   const [frequency, setFrequency] = useState('Monthly');
+  const [campaigns, setCampaigns] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const loadCampaigns = useCallback(async () => {
+    try {
+      const data = await givingAPI.getCampaigns().catch(() => null);
+      if (data) setCampaigns(data);
+    } catch (_) {} finally { setLoading(false); }
+  }, []);
+  useEffect(() => { loadCampaigns(); }, [loadCampaigns]);
 
   const displayAmount = customAmount ? parseFloat(customAmount) || 0 : selectedAmount || 0;
 
@@ -66,7 +72,7 @@ export default function GiveScreen() {
 
         <Text style={styles.sectionTitle}>Active Campaigns</Text>
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.campaignScroll}>
-          {MOCK_CAMPAIGNS.map((c) => {
+          {campaigns.map((c) => {
             const progress = c.current / c.goal;
             return (
               <View key={c.id} style={styles.campaignCard}>

@@ -1,21 +1,11 @@
-import React, { useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput } from 'react-native';
+import React, { useState, useEffect, useCallback } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Users, Plus, Search, MapPin, Calendar, ChevronRight } from 'lucide-react-native';
 import theme from '@/lib/theme';
+import { groupsAPI } from '@/lib/api';
 
-const MOCK_MY_GROUPS = [
-  { id: '1', name: 'Worship Team', type: 'ministry', member_count: 24, meeting_day: 'Wednesday', meeting_time: '7:00 PM', meeting_location: 'Worship Room', image_url: null },
-  { id: '2', name: "Men's Bible Study", type: 'small_group', member_count: 12, meeting_day: 'Tuesday', meeting_time: '6:30 AM', meeting_location: 'Room 201', image_url: null },
-  { id: '3', name: 'Young Adults', type: 'small_group', member_count: 18, meeting_day: 'Thursday', meeting_time: '7:00 PM', meeting_location: 'Student Center', image_url: null },
-];
-const MOCK_DISCOVER = [
-  { id: '4', name: 'Prayer Warriors', type: 'small_group', member_count: 15, description: 'Dedicated to intercessory prayer for our church and community', image_url: null },
-  { id: '5', name: 'Creative Arts', type: 'ministry', member_count: 20, description: 'Visual arts, drama, and creative expression for worship', image_url: null },
-  { id: '6', name: 'Couples Connect', type: 'small_group', member_count: 8, description: 'Strengthening marriages through faith and fellowship', image_url: null },
-  { id: '7', name: 'Tech Team', type: 'ministry', member_count: 10, description: 'Sound, lights, media, and livestream production', image_url: null },
-];
 const CATEGORIES = ['All', 'Small Groups', 'Ministry', 'Bible Study', 'Youth'];
 
 const badgeColor = (t: string) => {
@@ -38,12 +28,38 @@ export default function GroupsScreen() {
   const [search, setSearch] = useState('');
   const [category, setCategory] = useState('All');
   const [joinedIds, setJoinedIds] = useState<string[]>([]);
+  const [myGroups, setMyGroups] = useState<any[]>([]);
+  const [discover, setDiscover] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const filtered = MOCK_DISCOVER.filter(g => {
+  const loadData = useCallback(async () => {
+    try {
+      const [myData, allData] = await Promise.all([
+        groupsAPI.getMyGroups().catch(() => null),
+        groupsAPI.getAll().catch(() => null),
+      ]);
+      if (myData) setMyGroups(myData);
+      if (allData) setDiscover(allData);
+    } catch (_) {} finally { setLoading(false); }
+  }, []);
+  useEffect(() => { loadData(); }, [loadData]);
+
+  const filtered = discover.filter(g => {
     const ms = !search || g.name.toLowerCase().includes(search.toLowerCase()) || (g.description && g.description.toLowerCase().includes(search.toLowerCase()));
     const mc = category === 'All' || (category === 'Small Groups' && g.type === 'small_group') || (category === 'Ministry' && g.type === 'ministry');
     return ms && mc;
   });
+
+  if (loading) {
+    return (
+      <SafeAreaView style={st.container}>
+        <View style={st.header}><Text style={st.headerTitle}>Groups</Text></View>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+          <ActivityIndicator size="large" color={theme.colors.brandGreen} />
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={st.container}>
@@ -56,14 +72,14 @@ export default function GroupsScreen() {
         ))}
       </View>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={st.scroll}>
-        {activeTab === 'my' && (MOCK_MY_GROUPS.length === 0 ? (
+        {activeTab === 'my' && (myGroups.length === 0 ? (
           <View style={st.empty}>
             <Users size={48} color={theme.colors.gray300} />
             <Text style={st.emptyTitle}>No groups yet</Text>
             <Text style={st.emptySub}>Join a group to connect with your church community</Text>
             <TouchableOpacity style={st.emptyCta} onPress={() => setActiveTab('discover')}><Text style={st.emptyCtaTxt}>Browse Groups</Text></TouchableOpacity>
           </View>
-        ) : MOCK_MY_GROUPS.map(g => {
+        ) : myGroups.map(g => {
           const bc = badgeColor(g.type);
           return (
             <TouchableOpacity key={g.id} style={st.card} activeOpacity={0.7} onPress={() => router.push(`/groups/${g.id}` as any)}>

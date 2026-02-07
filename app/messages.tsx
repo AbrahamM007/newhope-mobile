@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -10,30 +10,14 @@ import {
   SafeAreaView,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ArrowLeft, Plus, Send, Users, User, UsersRound, Hand, SmilePlus } from 'lucide-react-native';
+import { messagesAPI } from '@/lib/api';
 
 const brandGreen = '#15803d';
 const brandDark = '#1a1a1a';
-
-const MOCK_CONVERSATIONS = [
-  { id: '1', name: 'Sarah Johnson', type: 'dm', lastMessage: 'See you at practice tonight!', time: '2m ago', unread: 2 },
-  { id: '2', name: 'Worship Team', type: 'group', lastMessage: 'Mike: Updated the setlist for Sunday', time: '15m ago', unread: 5 },
-  { id: '3', name: 'Sunday 9AM Team', type: 'team', lastMessage: 'Call time is 7:30 AM', time: '1h ago', unread: 0 },
-  { id: '4', name: 'Pastor Mike', type: 'dm', lastMessage: 'Great job leading worship today', time: '3h ago', unread: 0 },
-  { id: '5', name: 'Youth Leaders', type: 'group', lastMessage: 'Emily: Who can help with setup Friday?', time: '5h ago', unread: 1 },
-  { id: '6', name: 'Prayer Circle', type: 'group', lastMessage: 'David: Praying for you all', time: '1d ago', unread: 0 },
-];
-
-const MOCK_MESSAGES = [
-  { id: '1', sender: 'Sarah', content: 'Hey! Are you coming to practice tonight?', time: '6:30 PM', isMine: false, isPrayer: false, reactions: [] },
-  { id: '2', sender: 'Me', content: "Yes! I'll be there at 7. Should I bring my capo?", time: '6:32 PM', isMine: true, isPrayer: false, reactions: ['👍', '🎸'] },
-  { id: '3', sender: 'Sarah', content: "Yes please! We're doing Way Maker in E", time: '6:33 PM', isMine: false, isPrayer: false, reactions: [] },
-  { id: '4', sender: 'Me', content: 'Perfect, see you there!', time: '6:35 PM', isMine: true, isPrayer: false, reactions: [] },
-  { id: '5', sender: 'Sarah', content: 'Please keep my family in your prayers this week', time: '6:38 PM', isMine: false, isPrayer: true, reactions: ['🙏'] },
-  { id: '6', sender: 'Sarah', content: 'See you at practice tonight!', time: '6:40 PM', isMine: false, isPrayer: false, reactions: [] },
-];
 
 const TABS = ['All', 'Direct', 'Groups', 'Teams'];
 
@@ -54,8 +38,26 @@ export default function MessagesScreen() {
   const [selectedChat, setSelectedChat] = useState<string | null>(null);
   const [messageText, setMessageText] = useState('');
   const [prayedMessages, setPrayedMessages] = useState<string[]>([]);
+  const [conversations, setConversations] = useState<any[]>([]);
+  const [messages, setMessages] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  const filteredConversations = MOCK_CONVERSATIONS.filter((c) => {
+  const loadConversations = useCallback(async () => {
+    try {
+      const data = await messagesAPI.getConversations().catch(() => null);
+      if (data) setConversations(data);
+    } catch (_) {} finally { setLoading(false); }
+  }, []);
+  useEffect(() => { loadConversations(); }, [loadConversations]);
+
+  const loadMessages = useCallback(async (userId: string) => {
+    try {
+      const data = await messagesAPI.getDMMessages(userId).catch(() => null);
+      if (data) setMessages(data);
+    } catch (_) {}
+  }, []);
+
+  const filteredConversations = conversations.filter((c) => {
     if (activeTab === 'All') return true;
     if (activeTab === 'Direct') return c.type === 'dm';
     if (activeTab === 'Groups') return c.type === 'group';
@@ -63,7 +65,7 @@ export default function MessagesScreen() {
     return true;
   });
 
-  const selectedConversation = MOCK_CONVERSATIONS.find((c) => c.id === selectedChat);
+  const selectedConversation = conversations.find((c) => c.id === selectedChat);
 
   const handlePrayed = (msgId: string) => {
     setPrayedMessages((prev) =>
@@ -84,7 +86,7 @@ export default function MessagesScreen() {
           <Text style={styles.chatHeaderName}>{selectedConversation.name}</Text>
         </View>
         <FlatList
-          data={MOCK_MESSAGES}
+          data={messages}
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.messagesList}
           renderItem={({ item }) => (
@@ -120,9 +122,6 @@ export default function MessagesScreen() {
             </View>
           )}
         />
-        <View style={styles.typingIndicator}>
-          <Text style={styles.typingText}>Sarah is typing...</Text>
-        </View>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.inputBar}>
             <TextInput
@@ -168,7 +167,7 @@ export default function MessagesScreen() {
         keyExtractor={(item) => item.id}
         contentContainerStyle={styles.listContent}
         renderItem={({ item }) => (
-          <TouchableOpacity style={styles.conversationRow} onPress={() => setSelectedChat(item.id)}>
+          <TouchableOpacity style={styles.conversationRow} onPress={() => { setSelectedChat(item.id); loadMessages(item.id); }}>
             <View style={styles.avatarCircle}>
               <Text style={styles.avatarText}>{getInitials(item.name)}</Text>
             </View>
