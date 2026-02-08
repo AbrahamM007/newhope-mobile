@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { ArrowLeft, SlidersHorizontal, Search, MapPin, Clock, Users, CalendarPlus, Check } from 'lucide-react-native';
-import { eventsFullAPI } from '@/lib/api';
+import { supabaseService } from '@/lib/supabase-service';
 
 const brandGreen = '#15803d';
 const brandDark = '#1a1a1a';
@@ -50,9 +50,13 @@ export default function EventsScreen() {
 
   const loadEvents = useCallback(async () => {
     try {
-      const data = await eventsFullAPI.getAll(true).catch(() => null);
+      const data = await supabaseService.events.getUpcoming(20).catch(() => null);
       if (data) setEvents(data);
-    } catch (_) {} finally { setLoading(false); }
+    } catch (error) {
+      console.error('Error loading events:', error);
+    } finally {
+      setLoading(false);
+    }
   }, []);
   useEffect(() => { loadEvents(); }, [loadEvents]);
 

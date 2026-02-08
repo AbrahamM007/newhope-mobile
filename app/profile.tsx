@@ -13,7 +13,7 @@ import { useRouter } from 'expo-router';
 import { ArrowLeft, Edit2, ChevronRight, LogOut, Lock, Users } from 'lucide-react-native';
 import { colors } from '@/lib/theme';
 import { useAuth } from '@/context/AuthContext';
-import { profileAPI } from '@/lib/api';
+import { supabaseService } from '@/lib/supabase-service';
 
 const brandGreen = colors.brandGreen;
 const brandDark = colors.brandDark;
@@ -42,10 +42,13 @@ export default function ProfileScreen() {
 
   const loadHousehold = useCallback(async () => {
     try {
-      const data = await profileAPI.getHousehold().catch(() => null);
-      if (data) setHousehold(data);
-    } catch (_) {}
-  }, []);
+      if (user?.profile) {
+        setHousehold([]);
+      }
+    } catch (error) {
+      console.error('Error loading household:', error);
+    }
+  }, [user]);
   useEffect(() => { loadHousehold(); }, [loadHousehold]);
 
   const toggleNotif = (key: keyof typeof notifications) =>

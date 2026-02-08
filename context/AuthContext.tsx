@@ -1,14 +1,17 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import {
-    authAPI,
-    setAuthToken,
-    getAuthToken,
-    removeAuthToken,
-    setStoredUser,
-    getStoredUser,
-    removeStoredUser,
-    apiClient,
-} from '@/lib/api';
+import { supabase } from '@/lib/supabase';
+
+interface UserProfile {
+    id: string;
+    auth_id: string;
+    first_name: string;
+    last_name: string;
+    email: string;
+    avatar_url?: string;
+    campus_id?: string;
+    is_active: boolean;
+    is_discoverable: boolean;
+}
 
 interface User {
     id: string;
@@ -16,7 +19,7 @@ interface User {
     firstName: string;
     lastName: string;
     avatar?: string;
-    roles: string[];
+    profile?: UserProfile;
 }
 
 interface AuthContextType {
@@ -34,43 +37,48 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     const [user, setUser] = useState<User | null>(null);
     const [loading, setLoading] = useState(true);
 
-    // Setup Axios Interceptor
     useEffect(() => {
-        const interceptor = apiClient.interceptors.response.use(
-            (response) => response,
-            async (error) => {
-                const originalRequest = error.config;
-                if ((error.response?.status === 401 || error.response?.status === 403) && !originalRequest._retry) {
-                    originalRequest._retry = true;
-                    await signOut();
+        initAuth();
+
+        const { data: { subscription } } = supabase.auth.onAuthStateChange(
+            async (_event, session) => {
+                if (session?.user) {
+                    const profile = await fetchUserProfile(session.user.id);
+                    if (profile) {
+                        setUser({
+                            id: session.user.id,
+                            email: session.user.email || '',
+                            firstName: profile.first_name,
+                            lastName: profile.last_name,
+                            avatar: profile.avatar_url,
+                            profile,
+                        });
+                    }
+                } else {
+                    setUser(null);
                 }
-                return Promise.reject(error);
             }
         );
 
         return () => {
-            apiClient.interceptors.response.eject(interceptor);
+            subscription?.unsubscribe();
         };
-    }, []);
-
-    useEffect(() => {
-        initAuth();
     }, []);
 
     const initAuth = async () => {
         try {
-            // Check for existing token
-            const token = await getAuthToken();
-            if (token) {
-                // Validate token by fetching user
-                try {
-                    const userData = await authAPI.me();
-                    setUser(userData);
-                    await setStoredUser(userData);
-                } catch (error) {
-                    // Token invalid, clear it
-                    await removeAuthToken();
-                    await removeStoredUser();
+            const { data: { session } } = await supabase.auth.getSession();
+            if (session?.user) {
+                const profile = await fetchUserProfile(session.user.id);
+                if (profile) {
+                    setUser({
+                        id: session.user.id,
+                        email: session.user.email || '',
+                        firstName: profile.first_name,
+                        lastName: profile.last_name,
+                        avatar: profile.avatar_url,
+                        profile,
+                    });
                 }
             }
         } catch (error) {
@@ -80,29 +88,77 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
     };
 
-    const signUp = async (email: string, password: string, firstName: string, lastName: string) => {
-        const response = await authAPI.register(email, password, firstName, lastName);
+    const fetchUserProfile = async (authId: string) => {
+        try {
+            const { data, error } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('auth_id', authId)
+                .maybeSingle();
 
-        if (response.token) {
-            await setAuthToken(response.token);
-            setUser(response.user);
-            await setStoredUser(response.user);
+            if (error) throw error;
+            return data as UserProfile | null;
+        } catch (error) {
+            console.error('Failed to fetch profile:', error);
+            return null;
+        }
+    };
+
+    const signUp = async (email: string, password: string, firstName: string, lastName: string) => {
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+            email,
+            password,
+        });
+
+        if (authError) throw authError;
+        if (!authData.user) throw new Error('No user created');
+
+        const { error: profileError } = await supabase.from('profiles').insert({
+            auth_id: authData.user.id,
+            first_name: firstName,
+            last_name: lastName,
+            email,
+        });
+
+        if (profileError) throw profileError;
+
+        const profile = await fetchUserProfile(authData.user.id);
+        if (profile) {
+            setUser({
+                id: authData.user.id,
+                email: authData.user.email || '',
+                firstName: profile.first_name,
+                lastName: profile.last_name,
+                avatar: profile.avatar_url,
+                profile,
+            });
         }
     };
 
     const signIn = async (email: string, password: string) => {
-        const response = await authAPI.login(email, password);
+        const { data, error } = await supabase.auth.signInWithPassword({
+            email,
+            password,
+        });
 
-        if (response.token) {
-            await setAuthToken(response.token);
-            setUser(response.user);
-            await setStoredUser(response.user);
+        if (error) throw error;
+        if (!data.user) throw new Error('No user returned');
+
+        const profile = await fetchUserProfile(data.user.id);
+        if (profile) {
+            setUser({
+                id: data.user.id,
+                email: data.user.email || '',
+                firstName: profile.first_name,
+                lastName: profile.last_name,
+                avatar: profile.avatar_url,
+                profile,
+            });
         }
     };
 
     const signOut = async () => {
-        await removeAuthToken();
-        await removeStoredUser();
+        await supabase.auth.signOut();
         setUser(null);
     };
 

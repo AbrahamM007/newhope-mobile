@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/context/AuthContext';
-import { eventsAPI, servicesAPI, servingAPI, announcementsAPI } from '@/lib/api';
+import { supabaseService } from '@/lib/supabase-service';
 import { useRouter } from 'expo-router';
 import theme from '@/lib/theme';
 import { StatusBar } from 'expo-status-bar';
@@ -68,16 +68,15 @@ export default function HomeScreen() {
 
   const loadData = useCallback(async () => {
     try {
-      const [evData, , schedData, annData] = await Promise.all([
-        eventsAPI.getUpcoming(3).catch(() => null),
-        servicesAPI.getAll().catch(() => null),
-        servingAPI.getMySchedule(true).catch(() => null),
-        announcementsAPI.getAll().catch(() => null),
+      const [evData, annData] = await Promise.all([
+        supabaseService.events.getUpcoming(3).catch(() => null),
+        supabaseService.announcements.getAll(3).catch(() => null),
       ]);
-      if (evData?.length) setEvents(evData);
-      if (schedData?.length) setServing(schedData[0]);
-      if (annData?.length) setAnnouncements(annData.slice(0, 3));
-    } catch (_) {}
+      if (Array.isArray(evData)) setEvents(evData);
+      if (Array.isArray(annData)) setAnnouncements(annData);
+    } catch (error) {
+      console.error('Error loading home data:', error);
+    }
   }, []);
 
   useEffect(() => { loadData(); }, [loadData]);

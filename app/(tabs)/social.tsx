@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, FlatList, Image, 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Heart, MessageCircle, Share2, Bookmark, Plus, X, Send, BookOpen, Camera, Type, HandHeart, BarChart3 } from 'lucide-react-native';
 import theme from '@/lib/theme';
-import { postsAPI, storiesAPI } from '@/lib/api';
+import { supabaseService } from '@/lib/supabase-service';
 import { useAuth } from '@/context/AuthContext';
 
 const FEED_TABS = ['For You', 'Church', 'My Groups', 'Ministry'];
@@ -54,13 +54,14 @@ export default function SocialScreen() {
 
   const loadData = useCallback(async () => {
     try {
-      const [postsData, storiesData] = await Promise.all([
-        postsAPI.getAll().catch(() => null),
-        storiesAPI.getAll().catch(() => null),
-      ]);
+      const postsData = await supabaseService.posts.getFeed(10, 0).catch(() => null);
       if (postsData) setPosts(postsData);
-      if (storiesData) setStories([{ id: 'add', name: 'Your Story', isAdd: true }, ...storiesData]);
-    } catch (_) {} finally { setLoading(false); }
+      setStories([{ id: 'add', name: 'Your Story', isAdd: true }]);
+    } catch (error) {
+      console.error('Error loading feed:', error);
+    } finally {
+      setLoading(false);
+    }
   }, []);
   useEffect(() => { loadData(); }, [loadData]);
 
@@ -72,7 +73,12 @@ export default function SocialScreen() {
 
   const submit = async () => {
     if (!content.trim()) return;
-    try { await postsAPI.create(content.trim()); } catch {}
+    try {
+      await supabaseService.posts.create(content.trim(), postType, 'PUBLIC_CHURCH');
+      await loadData();
+    } catch (error) {
+      console.error('Error creating post:', error);
+    }
     setContent('');
     setShowModal(false);
   };

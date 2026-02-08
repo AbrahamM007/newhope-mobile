@@ -50,7 +50,8 @@ export default function SignupScreen() {
       await signUp(email, password, firstName, lastName);
       router.replace('/(tabs)');
     } catch (err: any) {
-      setError(err.response?.data?.message || err.message || 'Sign up failed');
+      const message = err.message || 'Sign up failed';
+      setError(message);
     } finally {
       setLoading(false);
     }

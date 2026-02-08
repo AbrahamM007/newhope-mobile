@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Users, Plus, Search, MapPin, Calendar, ChevronRight } from 'lucide-react-native';
 import theme from '@/lib/theme';
-import { groupsAPI } from '@/lib/api';
+import { supabaseService } from '@/lib/supabase-service';
 
 const CATEGORIES = ['All', 'Small Groups', 'Ministry', 'Bible Study', 'Youth'];
 
@@ -35,12 +35,16 @@ export default function GroupsScreen() {
   const loadData = useCallback(async () => {
     try {
       const [myData, allData] = await Promise.all([
-        groupsAPI.getMyGroups().catch(() => null),
-        groupsAPI.getAll().catch(() => null),
+        supabaseService.groups.getMyGroups().catch(() => null),
+        supabaseService.groups.getAll(20).catch(() => null),
       ]);
       if (myData) setMyGroups(myData);
       if (allData) setDiscover(allData);
-    } catch (_) {} finally { setLoading(false); }
+    } catch (error) {
+      console.error('Error loading groups:', error);
+    } finally {
+      setLoading(false);
+    }
   }, []);
   useEffect(() => { loadData(); }, [loadData]);
 
