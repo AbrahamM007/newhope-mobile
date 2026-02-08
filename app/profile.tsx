@@ -7,10 +7,12 @@ import {
   Switch,
   StyleSheet,
   ActivityIndicator,
+  Modal,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { ArrowLeft, Edit2, ChevronRight, LogOut, Lock, Users } from 'lucide-react-native';
+import { ArrowLeft, Edit2, ChevronRight, LogOut, Lock, Users, Trash2, X } from 'lucide-react-native';
 import { colors } from '@/lib/theme';
 import { useAuth } from '@/context/AuthContext';
 import { supabaseService } from '@/lib/supabase-service';
@@ -22,7 +24,7 @@ const AVATAR_BG = '#86efac';
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, signOut } = useAuth();
+  const { user, signOut, deleteAccount } = useAuth();
 
   const displayName = user ? `${user.firstName} ${user.lastName}` : 'John Doe';
   const displayEmail = user?.email || 'john.doe@email.com';
@@ -39,6 +41,8 @@ export default function ProfileScreen() {
   const [privacy, setPrivacy] = useState({
     profileVisible: true, phoneVisible: false, emailVisible: true, discoverable: true,
   });
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   const loadHousehold = useCallback(async () => {
     try {
@@ -55,6 +59,18 @@ export default function ProfileScreen() {
     setNotifications((p) => ({ ...p, [key]: !p[key] }));
   const togglePrivacy = (key: keyof typeof privacy) =>
     setPrivacy((p) => ({ ...p, [key]: !p[key] }));
+
+  const handleDeleteAccount = async () => {
+    setDeleteLoading(true);
+    try {
+      await deleteAccount();
+      router.replace('/(auth)/login');
+    } catch (error) {
+      console.error('Delete failed:', error);
+      Alert.alert('Error', 'Failed to delete account. Please try again.');
+      setDeleteLoading(false);
+    }
+  };
 
   const notifRows = [
     { key: 'social' as const, label: 'Social' },
@@ -178,12 +194,65 @@ export default function ProfileScreen() {
               <Text style={styles.signOutText}>Sign Out</Text>
               <ChevronRight size={18} color="#ccc" />
             </TouchableOpacity>
+            <View style={styles.divider} />
+            <TouchableOpacity style={styles.accountRow} onPress={() => setShowDeleteModal(true)}>
+              <Trash2 size={18} color="#dc2626" />
+              <Text style={styles.deleteText}>Delete Account</Text>
+              <ChevronRight size={18} color="#ccc" />
+            </TouchableOpacity>
           </View>
         </View>
 
         <Text style={styles.appInfo}>NewHope App v1.0.0</Text>
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      <Modal visible={showDeleteModal} transparent={true} animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.deleteModal}>
+            <View style={styles.deleteModalHeader}>
+              <Text style={styles.deleteModalTitle}>Delete Account?</Text>
+              <TouchableOpacity onPress={() => setShowDeleteModal(false)}>
+                <X size={24} color={brandDark} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.deleteModalWarning}>
+              This action cannot be undone. All your data will be permanently deleted, including:
+            </Text>
+
+            <View style={styles.deleteModalList}>
+              <Text style={styles.deleteModalItem}>• Your profile and personal information</Text>
+              <Text style={styles.deleteModalItem}>• All messages and conversations</Text>
+              <Text style={styles.deleteModalItem}>• Your group memberships</Text>
+              <Text style={styles.deleteModalItem}>• Prayer requests and interactions</Text>
+              <Text style={styles.deleteModalItem}>• All other associated data</Text>
+            </View>
+
+            <View style={styles.deleteModalActions}>
+              <TouchableOpacity
+                style={styles.cancelBtn}
+                onPress={() => setShowDeleteModal(false)}
+                disabled={deleteLoading}
+              >
+                <Text style={styles.cancelBtnText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.deleteBtn}
+                onPress={handleDeleteAccount}
+                disabled={deleteLoading}
+              >
+                {deleteLoading ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.deleteBtnText}>Delete Permanently</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -225,5 +294,18 @@ const styles = StyleSheet.create({
   accountRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 14, paddingHorizontal: 12, gap: 10 },
   accountRowText: { flex: 1, fontSize: 14, fontWeight: '500', color: brandDark },
   signOutText: { flex: 1, fontSize: 14, fontWeight: '500', color: '#ef4444' },
+  deleteText: { flex: 1, fontSize: 14, fontWeight: '500', color: '#dc2626' },
   appInfo: { textAlign: 'center', fontSize: 12, color: '#bbb', marginTop: 30 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.5)', justifyContent: 'center', alignItems: 'center', padding: 16 },
+  deleteModal: { backgroundColor: '#fff', borderRadius: 16, padding: 20, width: '100%', maxWidth: 400 },
+  deleteModalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  deleteModalTitle: { fontSize: 18, fontWeight: '700', color: '#dc2626' },
+  deleteModalWarning: { fontSize: 14, color: '#666', lineHeight: 20, marginBottom: 16 },
+  deleteModalList: { backgroundColor: '#fef2f2', borderRadius: 8, padding: 12, marginBottom: 20 },
+  deleteModalItem: { fontSize: 13, color: '#991b1b', marginVertical: 4, lineHeight: 18 },
+  deleteModalActions: { flexDirection: 'row', gap: 12 },
+  cancelBtn: { flex: 1, paddingVertical: 12, borderRadius: 8, borderWidth: 1.5, borderColor: '#e5e7eb', alignItems: 'center' },
+  cancelBtnText: { fontSize: 14, fontWeight: '600', color: brandDark },
+  deleteBtn: { flex: 1, paddingVertical: 12, borderRadius: 8, backgroundColor: '#dc2626', alignItems: 'center' },
+  deleteBtnText: { fontSize: 14, fontWeight: '600', color: '#fff' },
 });
