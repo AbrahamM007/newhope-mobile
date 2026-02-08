@@ -1,190 +1,722 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  FlatList,
+  ActivityIndicator,
+  Alert,
+  RefreshControl,
+  Modal,
+  TextInput,
+  ScrollView,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import { Users, Plus, Search, MapPin, Calendar, ChevronRight } from 'lucide-react-native';
+import { Users, Lock, Lock2, LogIn, Send, Plus, X, MessageSquare, Shield, Zap } from 'lucide-react-native';
 import theme from '@/lib/theme';
 import { supabaseService } from '@/lib/supabase-service';
+import { useAuth } from '@/context/AuthContext';
 
-const CATEGORIES = ['All', 'Small Groups', 'Ministry', 'Bible Study', 'Youth'];
+interface Group {
+  id: string;
+  name: string;
+  description: string;
+  is_core_group: boolean;
+  group_type_category: string;
+  join_policy: string;
+  visibility_scope: string;
+  members?: Array<{ count?: number }>;
+  userRole?: string;
+}
 
-const badgeColor = (t: string) => {
-  if (t === 'ministry') return { bg: '#ecfdf5', fg: theme.colors.brandGreen };
-  if (t === 'small_group') return { bg: '#eff6ff', fg: theme.colors.info };
-  if (t === 'team') return { bg: '#fffbeb', fg: theme.colors.warning };
-  return { bg: theme.colors.gray100, fg: theme.colors.gray500 };
-};
-const typeLabel = (t: string) => t === 'ministry' ? 'Ministry' : t === 'small_group' ? 'Small Group' : t === 'team' ? 'Team' : t;
-const avatarColor = (n: string) => {
-  const c = [theme.colors.brandGreen, theme.colors.info, '#8b5cf6', '#ec4899', theme.colors.warning];
-  let h = 0;
-  for (let i = 0; i < n.length; i++) h = n.charCodeAt(i) + ((h << 5) - h);
-  return c[Math.abs(h) % c.length];
-};
+const TABS = ['My Groups', 'Ministry Teams', 'Open Groups'];
 
 export default function GroupsScreen() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState<'my' | 'discover'>('my');
-  const [search, setSearch] = useState('');
-  const [category, setCategory] = useState('All');
-  const [joinedIds, setJoinedIds] = useState<string[]>([]);
-  const [myGroups, setMyGroups] = useState<any[]>([]);
-  const [discover, setDiscover] = useState<any[]>([]);
+  const { user } = useAuth();
+  const [activeTab, setActiveTab] = useState('My Groups');
+  const [myGroups, setMyGroups] = useState<Group[]>([]);
+  const [coreGroups, setCoreGroups] = useState<Group[]>([]);
+  const [openGroups, setOpenGroups] = useState<Group[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [selectedGroup, setSelectedGroup] = useState<Group | null>(null);
+  const [showRequestModal, setShowRequestModal] = useState(false);
+  const [requestMessage, setRequestMessage] = useState('');
+  const [submitting, setSubmitting] = useState(false);
 
-  const loadData = useCallback(async () => {
+  const loadGroups = useCallback(async () => {
     try {
-      const [myData, allData] = await Promise.all([
-        supabaseService.groups.getMyGroups().catch(() => null),
-        supabaseService.groups.getAll(20).catch(() => null),
+      const [myGroupsData, coreGroupsData, openGroupsData] = await Promise.all([
+        supabaseService.groups.getMyGroups().catch(() => []),
+        supabaseService.groups.getCoreGroups().catch(() => []),
+        supabaseService.groups.getOpenGroups().catch(() => []),
       ]);
-      if (myData) setMyGroups(myData);
-      if (allData) setDiscover(allData);
+
+      setMyGroups(myGroupsData || []);
+      setCoreGroups(coreGroupsData || []);
+      setOpenGroups(openGroupsData || []);
     } catch (error) {
       console.error('Error loading groups:', error);
+      Alert.alert('Error', 'Failed to load groups');
     } finally {
       setLoading(false);
     }
   }, []);
-  useEffect(() => { loadData(); }, [loadData]);
 
-  const filtered = discover.filter(g => {
-    const ms = !search || g.name.toLowerCase().includes(search.toLowerCase()) || (g.description && g.description.toLowerCase().includes(search.toLowerCase()));
-    const mc = category === 'All' || (category === 'Small Groups' && g.type === 'small_group') || (category === 'Ministry' && g.type === 'ministry');
-    return ms && mc;
-  });
+  useEffect(() => {
+    loadGroups();
+  }, [loadGroups]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadGroups();
+    setRefreshing(false);
+  }, [loadGroups]);
+
+  const handleRequestAccess = async () => {
+    if (!selectedGroup) return;
+
+    setSubmitting(true);
+    try {
+      await supabaseService.groups.requestJoin(
+        selectedGroup.id,
+        'serve',
+        requestMessage
+      );
+      Alert.alert('Success', 'Your request has been sent to the leaders!');
+      setShowRequestModal(false);
+      setRequestMessage('');
+      setSelectedGroup(null);
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to send request');
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleAdminAccess = () => {
+    router.push('/groups/admin');
+  };
+
+  const getMemberCount = (group: Group) => {
+    if (Array.isArray(group.members)) {
+      return group.members.reduce((sum, m: any) => sum + (m.count || 0), 0);
+    }
+    return 0;
+  };
+
+  const renderCoreGroupCard = ({ item }: { item: Group }) => {
+    const isJoined = myGroups.some(g => g.id === item.id);
+    const memberCount = getMemberCount(item);
+
+    return (
+      <View style={styles.groupCard}>
+        <View style={styles.groupHeader}>
+          <View style={[styles.groupIcon, { backgroundColor: '#fef3c7' }]}>
+            <Shield size={20} color="#92400e" />
+          </View>
+          <View style={styles.groupInfo}>
+            <Text style={styles.groupName}>{item.name}</Text>
+            <Text style={styles.groupDesc} numberOfLines={1}>
+              {item.description}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.groupFooter}>
+          <View style={styles.groupMeta}>
+            <View style={styles.metaItem}>
+              <Users size={14} color={theme.colors.gray500} />
+              <Text style={styles.metaText}>{memberCount}</Text>
+            </View>
+            <View style={[styles.metaBadge, { backgroundColor: '#DBEAFE' }]}>
+              <Lock size={12} color="#1E40AF" />
+              <Text style={[styles.metaBadgeText, { color: '#1E40AF' }]}>Invite</Text>
+            </View>
+          </View>
+
+          {isJoined ? (
+            <TouchableOpacity
+              style={styles.joinedButton}
+              onPress={() => router.push(`/groups/${item.id}`)}
+            >
+              <MessageSquare size={14} color={theme.colors.brandGreen} />
+              <Text style={styles.joinedButtonText}>View</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={styles.requestButton}
+              onPress={() => {
+                setSelectedGroup(item);
+                setShowRequestModal(true);
+              }}
+            >
+              <Send size={14} color="#9ca3af" />
+              <Text style={styles.requestButtonText}>Request</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    );
+  };
+
+  const renderOpenGroupCard = ({ item }: { item: Group }) => {
+    const isJoined = myGroups.some(g => g.id === item.id);
+    const memberCount = getMemberCount(item);
+
+    return (
+      <View style={styles.groupCard}>
+        <View style={styles.groupHeader}>
+          <View style={[styles.groupIcon, { backgroundColor: '#ccfbf1' }]}>
+            <Users size={20} color="#115e59" />
+          </View>
+          <View style={styles.groupInfo}>
+            <Text style={styles.groupName}>{item.name}</Text>
+            <Text style={styles.groupDesc} numberOfLines={1}>
+              {item.description}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.groupFooter}>
+          <View style={styles.groupMeta}>
+            <View style={styles.metaItem}>
+              <Users size={14} color={theme.colors.gray500} />
+              <Text style={styles.metaText}>{memberCount}</Text>
+            </View>
+            {item.join_policy === 'OPEN' && (
+              <View style={[styles.metaBadge, { backgroundColor: '#dcfce7' }]}>
+                <Zap size={12} color="#166534" />
+                <Text style={[styles.metaBadgeText, { color: '#166534' }]}>Open</Text>
+              </View>
+            )}
+            {item.join_policy === 'REQUEST_TO_JOIN' && (
+              <View style={[styles.metaBadge, { backgroundColor: '#fef3c7' }]}>
+                <MessageSquare size={12} color="#92400e" />
+                <Text style={[styles.metaBadgeText, { color: '#92400e' }]}>Request</Text>
+              </View>
+            )}
+          </View>
+
+          {isJoined ? (
+            <TouchableOpacity
+              style={styles.joinedButton}
+              onPress={() => router.push(`/groups/${item.id}`)}
+            >
+              <MessageSquare size={14} color={theme.colors.brandGreen} />
+              <Text style={styles.joinedButtonText}>Open</Text>
+            </TouchableOpacity>
+          ) : item.join_policy === 'OPEN' ? (
+            <TouchableOpacity
+              style={styles.quickJoinButton}
+              onPress={async () => {
+                try {
+                  await supabaseService.groups.join(item.id);
+                  Alert.alert('Success', 'You joined the group!');
+                  await loadGroups();
+                } catch (error: any) {
+                  Alert.alert('Error', error.message || 'Failed to join group');
+                }
+              }}
+            >
+              <LogIn size={14} color={theme.colors.brandGreen} />
+              <Text style={styles.quickJoinButtonText}>Join</Text>
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              style={styles.requestButton}
+              onPress={() => {
+                setSelectedGroup(item);
+                setShowRequestModal(true);
+              }}
+            >
+              <Send size={14} color="#9ca3af" />
+              <Text style={styles.requestButtonText}>Request</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+    );
+  };
+
+  const myGroupsContent = myGroups.length > 0 ? (
+    <FlatList
+      data={myGroups}
+      renderItem={({ item }) => (
+        <TouchableOpacity
+          onPress={() => router.push(`/groups/${item.id}`)}
+          activeOpacity={0.7}
+        >
+          {item.is_core_group ? renderCoreGroupCard({ item }) : renderOpenGroupCard({ item })}
+        </TouchableOpacity>
+      )}
+      keyExtractor={item => item.id}
+      contentContainerStyle={styles.listContent}
+      scrollEnabled
+    />
+  ) : (
+    <View style={styles.emptyContainer}>
+      <Users size={48} color={theme.colors.gray300} />
+      <Text style={styles.emptyTitle}>No Groups Yet</Text>
+      <Text style={styles.emptyText}>
+        Join a group to connect with others or get involved in ministry
+      </Text>
+    </View>
+  );
+
+  const ministryTeamsContent = coreGroups.length > 0 ? (
+    <FlatList
+      data={coreGroups}
+      renderItem={renderCoreGroupCard}
+      keyExtractor={item => item.id}
+      contentContainerStyle={styles.listContent}
+      scrollEnabled
+    />
+  ) : (
+    <View style={styles.emptyContainer}>
+      <Shield size={48} color={theme.colors.gray300} />
+      <Text style={styles.emptyTitle}>No Ministry Teams</Text>
+      <Text style={styles.emptyText}>
+        Ministry teams are invite-only. Contact a leader to request access.
+      </Text>
+    </View>
+  );
+
+  const openGroupsContent = openGroups.length > 0 ? (
+    <FlatList
+      data={openGroups}
+      renderItem={renderOpenGroupCard}
+      keyExtractor={item => item.id}
+      contentContainerStyle={styles.listContent}
+      scrollEnabled
+    />
+  ) : (
+    <View style={styles.emptyContainer}>
+      <Users size={48} color={theme.colors.gray300} />
+      <Text style={styles.emptyTitle}>No Open Groups</Text>
+      <Text style={styles.emptyText}>
+        Check back soon for community and open groups
+      </Text>
+    </View>
+  );
 
   if (loading) {
     return (
-      <SafeAreaView style={st.container}>
-        <View style={st.header}><Text style={st.headerTitle}>Groups</Text></View>
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Groups</Text>
+        </View>
+        <View style={styles.centerContent}>
           <ActivityIndicator size="large" color={theme.colors.brandGreen} />
         </View>
       </SafeAreaView>
     );
   }
 
+  const currentContent = activeTab === 'My Groups' ? myGroupsContent : activeTab === 'Ministry Teams' ? ministryTeamsContent : openGroupsContent;
+
   return (
-    <SafeAreaView style={st.container}>
-      <View style={st.header}><Text style={st.headerTitle}>Groups</Text></View>
-      <View style={st.tabRow}>
-        {(['my', 'discover'] as const).map(t => (
-          <TouchableOpacity key={t} style={[st.tab, activeTab === t && st.tabOn]} onPress={() => setActiveTab(t)}>
-            <Text style={[st.tabTxt, activeTab === t && st.tabTxtOn]}>{t === 'my' ? 'My Groups' : 'Discover'}</Text>
-          </TouchableOpacity>
-        ))}
-      </View>
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={st.scroll}>
-        {activeTab === 'my' && (myGroups.length === 0 ? (
-          <View style={st.empty}>
-            <Users size={48} color={theme.colors.gray300} />
-            <Text style={st.emptyTitle}>No groups yet</Text>
-            <Text style={st.emptySub}>Join a group to connect with your church community</Text>
-            <TouchableOpacity style={st.emptyCta} onPress={() => setActiveTab('discover')}><Text style={st.emptyCtaTxt}>Browse Groups</Text></TouchableOpacity>
-          </View>
-        ) : myGroups.map(g => {
-          const bc = badgeColor(g.type);
-          return (
-            <TouchableOpacity key={g.id} style={st.card} activeOpacity={0.7} onPress={() => router.push(`/groups/${g.id}` as any)}>
-              <View style={[st.avatar, { backgroundColor: avatarColor(g.name) }]}><Text style={st.avatarL}>{g.name.charAt(0)}</Text></View>
-              <View style={st.info}>
-                <View style={st.nameRow}>
-                  <Text style={st.name} numberOfLines={1}>{g.name}</Text>
-                  <View style={[st.badge, { backgroundColor: bc.bg }]}><Text style={[st.badgeTxt, { color: bc.fg }]}>{typeLabel(g.type)}</Text></View>
-                </View>
-                <View style={st.meta}><Users size={12} color={theme.colors.gray400} /><Text style={st.metaTxt}>{g.member_count} members</Text></View>
-                <View style={st.meetRow}><Calendar size={12} color={theme.colors.gray400} /><Text style={st.meetTxt}>{g.meeting_day}s at {g.meeting_time}</Text></View>
-                <View style={st.meetRow}><MapPin size={12} color={theme.colors.gray400} /><Text style={st.meetTxt}>{g.meeting_location}</Text></View>
-              </View>
-              <ChevronRight size={18} color={theme.colors.gray300} />
+    <View style={styles.container}>
+      <SafeAreaView edges={['top']} style={styles.flex}>
+        <View style={styles.header}>
+          <View style={styles.headerTop}>
+            <Text style={styles.headerTitle}>Groups</Text>
+            <TouchableOpacity
+              onPress={handleAdminAccess}
+              style={styles.adminButton}
+            >
+              <Shield size={16} color={theme.colors.brandGreen} />
             </TouchableOpacity>
-          );
-        }))}
-        {activeTab === 'discover' && (<>
-          <View style={st.searchBox}>
-            <Search size={18} color={theme.colors.gray400} />
-            <TextInput style={st.searchIn} placeholder="Search groups..." placeholderTextColor={theme.colors.gray400} value={search} onChangeText={setSearch} />
           </View>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={st.chips}>
-            {CATEGORIES.map(c => (
-              <TouchableOpacity key={c} style={[st.chip, category === c && st.chipOn]} onPress={() => setCategory(c)}>
-                <Text style={[st.chipTxt, category === c && st.chipTxtOn]}>{c}</Text>
+        </View>
+
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.tabsContainer}
+          scrollEnabled
+        >
+          {TABS.map(tab => (
+            <TouchableOpacity
+              key={tab}
+              onPress={() => setActiveTab(tab)}
+              style={[styles.tab, activeTab === tab && styles.tabActive]}
+            >
+              <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
+                {tab}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
+        <View style={styles.content}>
+          {currentContent}
+        </View>
+      </SafeAreaView>
+
+      <Modal visible={showRequestModal} animationType="slide" transparent>
+        <SafeAreaView style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <TouchableOpacity onPress={() => setShowRequestModal(false)}>
+                <X size={24} color={theme.colors.text.primary} />
               </TouchableOpacity>
-            ))}
-          </ScrollView>
-          {filtered.length === 0 ? (
-            <View style={st.empty}><Search size={48} color={theme.colors.gray300} /><Text style={st.emptyTitle}>No groups found</Text><Text style={st.emptySub}>Try a different search or category</Text></View>
-          ) : filtered.map(g => {
-            const bc = badgeColor(g.type);
-            const joined = joinedIds.includes(g.id);
-            return (
-              <View key={g.id} style={st.dCard}>
-                <View style={st.dTop}>
-                  <View style={[st.avatar, { backgroundColor: avatarColor(g.name) }]}><Text style={st.avatarL}>{g.name.charAt(0)}</Text></View>
-                  <View style={st.dInfo}>
-                    <View style={st.nameRow}>
-                      <Text style={st.name} numberOfLines={1}>{g.name}</Text>
-                      <View style={[st.badge, { backgroundColor: bc.bg }]}><Text style={[st.badgeTxt, { color: bc.fg }]}>{typeLabel(g.type)}</Text></View>
-                    </View>
-                    <View style={st.meta}><Users size={12} color={theme.colors.gray400} /><Text style={st.metaTxt}>{g.member_count} members</Text></View>
-                  </View>
+              <Text style={styles.modalTitle}>Request to Join</Text>
+              <View style={styles.placeholder} />
+            </View>
+
+            <ScrollView style={styles.modalContent}>
+              <View style={styles.groupPreview}>
+                <View style={[styles.previewIcon, { backgroundColor: '#fef3c7' }]}>
+                  <Shield size={24} color="#92400e" />
                 </View>
-                {g.description && <Text style={st.dDesc} numberOfLines={2}>{g.description}</Text>}
-                <TouchableOpacity style={[st.joinBtn, joined && st.joinedBtn]} onPress={() => setJoinedIds(p => p.includes(g.id) ? p.filter(x => x !== g.id) : [...p, g.id])}>
-                  <Text style={[st.joinTxt, joined && st.joinedTxt]}>{joined ? 'Joined' : 'Join Group'}</Text>
-                </TouchableOpacity>
+                <Text style={styles.previewName}>{selectedGroup?.name}</Text>
+                <Text style={styles.previewDesc}>
+                  {selectedGroup?.description}
+                </Text>
               </View>
-            );
-          })}
-        </>)}
-      </ScrollView>
-      <TouchableOpacity style={st.fab}><Plus size={24} color={theme.colors.white} /></TouchableOpacity>
-    </SafeAreaView>
+
+              <Text style={styles.label}>Tell us why you'd like to join</Text>
+              <TextInput
+                style={styles.messageInput}
+                placeholder="Share your interest, experience, or availability..."
+                placeholderTextColor={theme.colors.gray400}
+                multiline
+                value={requestMessage}
+                onChangeText={setRequestMessage}
+                maxLength={500}
+              />
+              <Text style={styles.characterCount}>
+                {requestMessage.length}/500
+              </Text>
+
+              <View style={styles.infoBox}>
+                <Text style={styles.infoText}>
+                  A group leader will review your request and get back to you soon.
+                </Text>
+              </View>
+
+              <TouchableOpacity
+                style={[styles.submitButton, (!requestMessage.trim() || submitting) && styles.submitButtonDisabled]}
+                disabled={!requestMessage.trim() || submitting}
+                onPress={handleRequestAccess}
+              >
+                {submitting ? (
+                  <ActivityIndicator color="#fff" size="small" />
+                ) : (
+                  <>
+                    <Send size={16} color="#fff" />
+                    <Text style={styles.submitButtonText}>Send Request</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </SafeAreaView>
+      </Modal>
+    </View>
   );
 }
 
-const st = StyleSheet.create({
-  container: { flex: 1, backgroundColor: theme.colors.background.secondary },
-  header: { paddingHorizontal: 16, paddingVertical: 14, backgroundColor: theme.colors.white, borderBottomWidth: 1, borderBottomColor: theme.colors.border.light },
-  headerTitle: { fontSize: 22, fontWeight: '700', color: theme.colors.brandDark },
-  tabRow: { flexDirection: 'row', backgroundColor: theme.colors.white, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: theme.colors.border.light },
-  tab: { paddingVertical: 12, paddingHorizontal: 16, marginRight: 8 },
-  tabOn: { borderBottomWidth: 2, borderBottomColor: theme.colors.brandGreen },
-  tabTxt: { fontSize: 14, fontWeight: '500', color: theme.colors.gray500 },
-  tabTxtOn: { color: theme.colors.brandGreen, fontWeight: '600' },
-  scroll: { padding: 16, paddingBottom: 100 },
-  empty: { alignItems: 'center', paddingTop: 60 },
-  emptyTitle: { fontSize: 16, fontWeight: '600', color: theme.colors.gray500, marginTop: 12 },
-  emptySub: { fontSize: 13, color: theme.colors.gray400, marginTop: 4, textAlign: 'center' },
-  emptyCta: { backgroundColor: theme.colors.brandGreen, paddingHorizontal: 24, paddingVertical: 10, borderRadius: 10, marginTop: 16 },
-  emptyCtaTxt: { color: theme.colors.white, fontWeight: '600', fontSize: 14 },
-  card: { flexDirection: 'row', alignItems: 'center', backgroundColor: theme.colors.white, borderRadius: 12, padding: 14, marginBottom: 10, ...theme.shadows.sm },
-  avatar: { width: 48, height: 48, borderRadius: 24, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
-  avatarL: { fontSize: 20, fontWeight: '700', color: theme.colors.white },
-  info: { flex: 1 },
-  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 },
-  name: { fontSize: 15, fontWeight: '600', color: theme.colors.brandDark, flexShrink: 1 },
-  badge: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 8 },
-  badgeTxt: { fontSize: 10, fontWeight: '600' },
-  meta: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 2 },
-  metaTxt: { fontSize: 12, color: theme.colors.gray500 },
-  meetRow: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 3 },
-  meetTxt: { fontSize: 11, color: theme.colors.gray400 },
-  searchBox: { flexDirection: 'row', alignItems: 'center', backgroundColor: theme.colors.white, borderRadius: 12, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 12, ...theme.shadows.xs },
-  searchIn: { flex: 1, marginLeft: 10, fontSize: 14, color: theme.colors.brandDark },
-  chips: { paddingBottom: 16, gap: 8 },
-  chip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: theme.colors.white, borderWidth: 1, borderColor: theme.colors.border.medium },
-  chipOn: { backgroundColor: theme.colors.brandGreen, borderColor: theme.colors.brandGreen },
-  chipTxt: { fontSize: 13, fontWeight: '500', color: theme.colors.gray600 },
-  chipTxtOn: { color: theme.colors.white },
-  dCard: { backgroundColor: theme.colors.white, borderRadius: 12, padding: 14, marginBottom: 10, ...theme.shadows.sm },
-  dTop: { flexDirection: 'row', alignItems: 'center' },
-  dInfo: { flex: 1 },
-  dDesc: { fontSize: 13, color: theme.colors.gray500, lineHeight: 18, marginTop: 10, marginBottom: 12 },
-  joinBtn: { backgroundColor: theme.colors.brandGreen, paddingVertical: 10, borderRadius: 10, alignItems: 'center' },
-  joinedBtn: { backgroundColor: '#ecfdf5', borderWidth: 1, borderColor: theme.colors.brandGreen },
-  joinTxt: { fontSize: 14, fontWeight: '600', color: theme.colors.white },
-  joinedTxt: { color: theme.colors.brandGreen },
-  fab: { position: 'absolute', bottom: 24, right: 20, backgroundColor: theme.colors.brandGreen, width: 56, height: 56, borderRadius: 28, alignItems: 'center', justifyContent: 'center', ...theme.shadows.md },
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  flex: {
+    flex: 1,
+  },
+  header: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.gray100,
+  },
+  headerTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: theme.colors.text.primary,
+  },
+  adminButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 8,
+    backgroundColor: '#f0fdf4',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  tabsContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  tab: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    marginRight: 8,
+    borderRadius: 20,
+    backgroundColor: theme.colors.gray100,
+  },
+  tabActive: {
+    backgroundColor: theme.colors.brandGreen,
+  },
+  tabText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: theme.colors.gray600,
+  },
+  tabTextActive: {
+    color: '#fff',
+  },
+  content: {
+    flex: 1,
+  },
+  listContent: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    paddingBottom: 20,
+  },
+  groupCard: {
+    backgroundColor: '#f9fafb',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: theme.colors.gray100,
+  },
+  groupHeader: {
+    flexDirection: 'row',
+    marginBottom: 12,
+  },
+  groupIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  groupInfo: {
+    flex: 1,
+  },
+  groupName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+    marginBottom: 2,
+  },
+  groupDesc: {
+    fontSize: 13,
+    color: theme.colors.gray500,
+  },
+  groupFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  groupMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  metaItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  metaText: {
+    fontSize: 12,
+    color: theme.colors.gray600,
+    marginLeft: 4,
+    fontWeight: '500',
+  },
+  metaBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+    marginRight: 8,
+  },
+  metaBadgeText: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  joinedButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#f0fdf4',
+    borderRadius: 6,
+  },
+  joinedButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: theme.colors.brandGreen,
+    marginLeft: 4,
+  },
+  quickJoinButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: '#f0fdf4',
+    borderRadius: 6,
+  },
+  quickJoinButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: theme.colors.brandGreen,
+    marginLeft: 4,
+  },
+  requestButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: theme.colors.gray100,
+    borderRadius: 6,
+  },
+  requestButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: theme.colors.gray600,
+    marginLeft: 4,
+  },
+  centerContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+    marginTop: 12,
+  },
+  emptyText: {
+    fontSize: 14,
+    color: theme.colors.gray500,
+    textAlign: 'center',
+    marginTop: 6,
+    lineHeight: 20,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.gray100,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+  },
+  placeholder: {
+    width: 24,
+  },
+  modalContent: {
+    flex: 1,
+    padding: 16,
+  },
+  groupPreview: {
+    alignItems: 'center',
+    paddingVertical: 20,
+  },
+  previewIcon: {
+    width: 56,
+    height: 56,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  previewName: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: theme.colors.text.primary,
+    marginBottom: 4,
+  },
+  previewDesc: {
+    fontSize: 13,
+    color: theme.colors.gray600,
+    textAlign: 'center',
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+    marginBottom: 8,
+    marginTop: 20,
+  },
+  messageInput: {
+    borderWidth: 1,
+    borderColor: theme.colors.gray200,
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 14,
+    color: theme.colors.text.primary,
+    textAlignVertical: 'top',
+    minHeight: 100,
+  },
+  characterCount: {
+    fontSize: 12,
+    color: theme.colors.gray500,
+    marginTop: 4,
+    textAlign: 'right',
+  },
+  infoBox: {
+    backgroundColor: theme.colors.gray50,
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 20,
+    marginBottom: 20,
+  },
+  infoText: {
+    fontSize: 13,
+    color: theme.colors.gray600,
+    lineHeight: 18,
+  },
+  submitButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.colors.brandGreen,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginBottom: 40,
+  },
+  submitButtonDisabled: {
+    opacity: 0.5,
+  },
+  submitButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    marginLeft: 8,
+  },
 });

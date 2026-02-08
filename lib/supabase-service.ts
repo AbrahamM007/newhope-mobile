@@ -245,6 +245,38 @@ export const supabaseService = {
       return data;
     },
 
+    getCoreGroups: async () => {
+      const { data, error } = await supabase
+        .from('groups')
+        .select(`
+          *,
+          members:group_members(count)
+        `)
+        .eq('is_core_group', true)
+        .eq('is_active', true)
+        .order('name', { ascending: true });
+
+      if (error) throw error;
+      return data;
+    },
+
+    getOpenGroups: async (limit = 50) => {
+      const { data, error } = await supabase
+        .from('groups')
+        .select(`
+          *,
+          leader:leader_id(id, first_name, last_name, avatar_url),
+          members:group_members(count)
+        `)
+        .eq('group_type_category', 'OPEN')
+        .eq('is_active', true)
+        .order('name', { ascending: true })
+        .limit(limit);
+
+      if (error) throw error;
+      return data;
+    },
+
     getMyGroups: async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
@@ -264,12 +296,14 @@ export const supabaseService = {
             *,
             leader:leader_id(id, first_name, last_name),
             members:group_members(count)
-          )
+          ),
+          group_role
         `)
-        .eq('user_id', profile.id);
+        .eq('user_id', profile.id)
+        .order('created_at', { ascending: false });
 
       if (error) throw error;
-      return data?.map(item => item.group) || [];
+      return data?.map(item => ({ ...item.group, userRole: item.group_role })) || [];
     },
 
     getById: async (groupId: string) => {
@@ -290,6 +324,75 @@ export const supabaseService = {
       return data;
     },
 
+    getMembers: async (groupId: string) => {
+      const { data, error } = await supabase
+        .from('group_members')
+        .select(`
+          *,
+          user:user_id(id, first_name, last_name, avatar_url)
+        `)
+        .eq('group_id', groupId)
+        .order('group_role', { ascending: true })
+        .order('joined_at', { ascending: false });
+
+      if (error) throw error;
+      return data;
+    },
+
+    addMember: async (groupId: string, userId: string, role = 'GROUP_MEMBER') => {
+      const { error } = await supabase
+        .from('group_members')
+        .insert({
+          group_id: groupId,
+          user_id: userId,
+          group_role: role,
+        });
+
+      if (error) throw error;
+    },
+
+    updateMemberRole: async (groupId: string, userId: string, role: string) => {
+      const { error } = await supabase
+        .from('group_members')
+        .update({ group_role: role })
+        .eq('group_id', groupId)
+        .eq('user_id', userId);
+
+      if (error) throw error;
+    },
+
+    removeMember: async (groupId: string, userId: string) => {
+      const { error } = await supabase
+        .from('group_members')
+        .delete()
+        .eq('group_id', groupId)
+        .eq('user_id', userId);
+
+      if (error) throw error;
+    },
+
+    assignLeader: async (groupId: string, userId: string) => {
+      const { error: removeError } = await supabase
+        .from('group_members')
+        .update({ group_role: 'GROUP_MEMBER' })
+        .eq('group_id', groupId)
+        .eq('group_role', 'GROUP_LEADER');
+
+      if (removeError && !removeError.message.includes('no rows')) throw removeError;
+
+      const { error } = await supabase
+        .from('group_members')
+        .upsert({
+          group_id: groupId,
+          user_id: userId,
+          group_role: 'GROUP_LEADER',
+        }, {
+          onConflict: 'group_id,user_id'
+        });
+
+      if (error) throw error;
+    },
+
     join: async (groupId: string) => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
@@ -307,6 +410,7 @@ export const supabaseService = {
         .insert({
           group_id: groupId,
           user_id: profile.id,
+          group_role: 'GROUP_MEMBER',
         });
 
       if (error) throw error;
@@ -329,6 +433,78 @@ export const supabaseService = {
         .delete()
         .eq('group_id', groupId)
         .eq('user_id', profile.id);
+
+      if (error) throw error;
+    },
+
+    requestJoin: async (groupId: string, requestType = 'serve', message?: string) => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('auth_id', user.id)
+        .maybeSingle();
+
+      if (!profile) throw new Error('Profile not found');
+
+      const { data, error } = await supabase
+        .from('group_join_requests')
+        .insert({
+          group_id: groupId,
+          user_id: profile.id,
+          request_type: requestType,
+          message,
+          status: 'pending',
+        })
+        .select()
+        .maybeSingle();
+
+      if (error) throw error;
+      return data;
+    },
+
+    getJoinRequests: async (groupId: string) => {
+      const { data, error } = await supabase
+        .from('group_join_requests')
+        .select(`
+          *,
+          user:user_id(id, first_name, last_name, avatar_url)
+        `)
+        .eq('group_id', groupId)
+        .eq('status', 'pending')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      return data;
+    },
+
+    approveJoinRequest: async (requestId: string) => {
+      const { data: request, error: fetchError } = await supabase
+        .from('group_join_requests')
+        .select()
+        .eq('id', requestId)
+        .maybeSingle();
+
+      if (fetchError) throw fetchError;
+      if (!request) throw new Error('Request not found');
+
+      await supabaseService.groups.addMember(request.group_id, request.user_id, 'GROUP_MEMBER');
+
+      const { error } = await supabase
+        .from('group_join_requests')
+        .update({ status: 'approved' })
+        .eq('id', requestId);
+
+      if (error) throw error;
+    },
+
+    rejectJoinRequest: async (requestId: string) => {
+      const { error } = await supabase
+        .from('group_join_requests')
+        .update({ status: 'rejected' })
+        .eq('id', requestId);
 
       if (error) throw error;
     },
