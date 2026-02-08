@@ -1,260 +1,813 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, FlatList, Image, Modal, TextInput, KeyboardAvoidingView, Platform, RefreshControl, ActivityIndicator } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  FlatList,
+  Image,
+  Modal,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  RefreshControl,
+  ActivityIndicator,
+  Alert,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Heart, MessageCircle, Share2, Bookmark, Plus, X, Send, BookOpen, Camera, Type, HandHeart, BarChart3 } from 'lucide-react-native';
+import { Heart, MessageCircle, Share2, Bookmark, Plus, X, Send, BookOpen, Camera, Type, HandHeart, BarChart3, Flame, Smile } from 'lucide-react-native';
 import theme from '@/lib/theme';
 import { supabaseService } from '@/lib/supabase-service';
 import { useAuth } from '@/context/AuthContext';
 
-const FEED_TABS = ['For You', 'Church', 'My Groups', 'Ministry'];
+const FEED_TABS = ['For You', 'Church'];
 const POST_TYPES = [
   { key: 'text', label: 'Text', icon: Type },
   { key: 'photo', label: 'Photo', icon: Camera },
   { key: 'scripture', label: 'Scripture', icon: BookOpen },
   { key: 'testimony', label: 'Testimony', icon: HandHeart },
-  { key: 'prayer', label: 'Prayer', icon: Heart },
-  { key: 'poll', label: 'Poll', icon: BarChart3 },
+  { key: 'prayer', label: 'Prayer', icon: Flame },
 ];
-const SCOPES = ['Church', 'Group', 'Ministry'];
+
 const TYPE_COLORS: Record<string, { bg: string; fg: string }> = {
   testimony: { bg: '#FEF3C7', fg: '#92400E' },
-  prayer_request: { bg: '#DBEAFE', fg: '#1E40AF' },
+  prayer: { bg: '#DBEAFE', fg: '#1E40AF' },
   scripture: { bg: '#CCFBF1', fg: '#115E59' },
-  praise_report: { bg: '#DCFCE7', fg: '#166534' },
+  text: { bg: '#F3F4F6', fg: '#4B5563' },
+  photo: { bg: '#F3F4F6', fg: '#4B5563' },
 };
 
-const timeAgo = (d: string) => {
-  const m = Math.floor((Date.now() - new Date(d).getTime()) / 60000);
-  if (m < 1) return 'Just now';
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  const dy = Math.floor(h / 24);
-  return dy < 7 ? `${dy}d ago` : new Date(d).toLocaleDateString();
-};
-const initials = (f: string, l: string) => `${f[0]}${l[0]}`.toUpperCase();
-const scopeText = (s: string) => s === 'MINISTRY' ? 'Ministry' : s === 'PUBLIC_CHURCH' ? 'Church' : s;
+const REACTION_EMOJIS = ['❤️', '🙌', '😂', '🔥', '🙏'];
 
-type Story = { id: string; name: string; isAdd?: boolean; avatar?: any; hasNew?: boolean };
-type Post = any;
+const timeAgo = (dateStr: string) => {
+  const date = new Date(dateStr);
+  const now = new Date();
+  const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+
+  if (seconds < 60) return 'just now';
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`;
+  return date.toLocaleDateString();
+};
+
+const getInitials = (firstName: string, lastName: string) => {
+  return `${firstName?.[0] || ''}${lastName?.[0] || ''}`.toUpperCase() || '?';
+};
+
+const getAvatarBgColor = (name: string) => {
+  const colors = ['#15803d', '#2563eb', '#7c3aed', '#dc2626', '#ea580c', '#0891b2'];
+  let hash = 0;
+  for (let i = 0; i < name.length; i++) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return colors[Math.abs(hash) % colors.length];
+};
 
 export default function SocialScreen() {
   const { user } = useAuth();
   const [activeTab, setActiveTab] = useState('For You');
   const [posts, setPosts] = useState<any[]>([]);
-  const [stories, setStories] = useState<any[]>([{ id: 'add', name: 'Your Story', isAdd: true }]);
+  const [stories, setStories] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [liked, setLiked] = useState<Set<string>>(new Set());
-  const [saved, setSaved] = useState<Set<string>>(new Set());
+  const [userReactions, setUserReactions] = useState<Record<string, string>>({});
   const [showModal, setShowModal] = useState(false);
   const [content, setContent] = useState('');
   const [postType, setPostType] = useState('text');
-  const [scope, setScope] = useState('Church');
+  const [submitting, setSubmitting] = useState(false);
+  const [showReactionPicker, setShowReactionPicker] = useState<string | null>(null);
 
-  const loadData = useCallback(async () => {
+  const loadFeed = useCallback(async () => {
     try {
-      const postsData = await supabaseService.posts.getFeed(10, 0).catch(() => null);
-      if (postsData) setPosts(postsData);
-      setStories([{ id: 'add', name: 'Your Story', isAdd: true }]);
+      const [postsData, storiesData] = await Promise.all([
+        supabaseService.posts.getFeed(20, 0).catch(() => []),
+        supabaseService.stories.getActive().catch(() => []),
+      ]);
+
+      setPosts(postsData || []);
+      setStories(storiesData || []);
     } catch (error) {
       console.error('Error loading feed:', error);
+      Alert.alert('Error', 'Failed to load feed. Please try again.');
     } finally {
       setLoading(false);
     }
   }, []);
-  useEffect(() => { loadData(); }, [loadData]);
 
-  const toggle = (set: Set<string>, id: string) => {
-    const n = new Set(set);
-    n.has(id) ? n.delete(id) : n.add(id);
-    return n;
-  };
+  useEffect(() => {
+    loadFeed();
+  }, [loadFeed]);
 
-  const submit = async () => {
-    if (!content.trim()) return;
-    try {
-      await supabaseService.posts.create(content.trim(), postType, 'PUBLIC_CHURCH');
-      await loadData();
-    } catch (error) {
-      console.error('Error creating post:', error);
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadFeed();
+    setRefreshing(false);
+  }, [loadFeed]);
+
+  const handleCreatePost = async () => {
+    if (!content.trim()) {
+      Alert.alert('Empty Post', 'Please write something before posting.');
+      return;
     }
-    setContent('');
-    setShowModal(false);
+
+    setSubmitting(true);
+    try {
+      await supabaseService.posts.create(
+        content.trim(),
+        postType,
+        'PUBLIC_CHURCH'
+      );
+
+      setContent('');
+      setPostType('text');
+      setShowModal(false);
+      Alert.alert('Success', 'Your post has been shared!');
+      await loadFeed();
+    } catch (error: any) {
+      console.error('Error creating post:', error);
+      Alert.alert('Error', error.message || 'Failed to create post. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
-  if (loading) {
+  const handleReact = async (postId: string, emoji: string) => {
+    try {
+      await supabaseService.posts.react(postId, emoji);
+      setUserReactions(prev => ({
+        ...prev,
+        [postId]: emoji,
+      }));
+      setShowReactionPicker(null);
+    } catch (error) {
+      console.error('Error reacting to post:', error);
+      Alert.alert('Error', 'Failed to add reaction. Please try again.');
+    }
+  };
+
+  const renderStory = ({ item }: { item: any }) => {
+    const author = item.author;
+    const initials = getInitials(author.first_name, author.last_name);
+    const bgColor = getAvatarBgColor(author.first_name);
+
     return (
-      <View style={s.container}>
-        <SafeAreaView edges={['top']} style={s.flex}>
-          <View style={s.header}><Text style={s.title}>Social</Text></View>
-          <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
-            <ActivityIndicator size="large" color={theme.colors.brandGreen} />
-          </View>
-        </SafeAreaView>
-      </View>
+      <TouchableOpacity style={styles.storyItem} activeOpacity={0.7}>
+        <View
+          style={[
+            styles.storyAvatar,
+            {
+              backgroundColor: bgColor,
+              borderWidth: 2,
+              borderColor: '#15803d',
+            },
+          ]}
+        >
+          <Text style={styles.storyInitials}>{initials}</Text>
+        </View>
+        <Text style={styles.storyName} numberOfLines={1}>
+          {author.first_name}
+        </Text>
+      </TouchableOpacity>
     );
-  }
+  };
 
-  const renderStory = ({ item }: { item: Story }) => (
-    <TouchableOpacity style={s.storyItem} activeOpacity={0.7}>
-      <View style={[s.storyCircle, item.hasNew && s.storyNew, item.isAdd && s.storyAdd]}>
-        {item.isAdd ? <Plus size={28} color={theme.colors.brandGreen} /> : <Text style={s.storyInit}>{item.name[0]}</Text>}
-      </View>
-      <Text style={s.storyName} numberOfLines={2}>{item.name}</Text>
-    </TouchableOpacity>
-  );
+  const renderPost = ({ item }: { item: any }) => {
+    const author = item.author;
+    const initials = getInitials(author.first_name, author.last_name);
+    const bgColor = getAvatarBgColor(author.first_name);
+    const typeColor = TYPE_COLORS[item.post_type] || TYPE_COLORS.text;
+    const userReaction = userReactions[item.id];
 
-  const renderPost = ({ item }: { item: Post }) => {
-    const isLiked = liked.has(item.id);
-    const isSaved = saved.has(item.id);
-    const tc = TYPE_COLORS[item.post_type];
-    const ref = 'scripture_ref' in item ? (item as any).scripture_ref : null;
-    const media = 'media_urls' in item ? (item as any).media_urls : null;
     return (
-      <View style={s.card}>
-        <View style={s.cardHead}>
-          <View style={s.avatar}><Text style={s.avatarTxt}>{initials(item.author.firstName, item.author.lastName)}</Text></View>
-          <View style={s.authorInfo}>
-            <View style={s.authorRow}>
-              <Text style={s.authorName}>{item.author.firstName} {item.author.lastName}</Text>
-              <View style={s.scope}><Text style={s.scopeTxt}>{scopeText(item.scope)}</Text></View>
+      <View style={styles.post}>
+        <View style={styles.postHeader}>
+          <View
+            style={[
+              styles.avatar,
+              { backgroundColor: bgColor },
+            ]}
+          >
+            <Text style={styles.avatarText}>{initials}</Text>
+          </View>
+
+          <View style={styles.authorInfo}>
+            <View style={styles.authorRow}>
+              <Text style={styles.authorName}>
+                {author.first_name} {author.last_name}
+              </Text>
+              <View style={[styles.typeBadge, { backgroundColor: typeColor.bg }]}>
+                <Text style={[styles.typeBadgeText, { color: typeColor.fg }]}>
+                  {item.post_type}
+                </Text>
+              </View>
             </View>
-            <Text style={s.time}>{timeAgo(item.created_at)}</Text>
+            <Text style={styles.timestamp}>{timeAgo(item.created_at)}</Text>
           </View>
         </View>
-        {tc && <View style={[s.badge, { backgroundColor: tc.bg }]}><Text style={[s.badgeTxt, { color: tc.fg }]}>{item.post_type.replace('_', ' ')}</Text></View>}
-        <Text style={s.body}>{item.content}</Text>
-        {ref && <View style={s.scripture}><BookOpen size={14} color="#115E59" /><Text style={s.scriptureTxt}>{ref}</Text></View>}
-        {media?.length > 0 && <Image source={{ uri: media[0] }} style={s.image} />}
-        <View style={s.stats}>
-          <Text style={s.statTxt}>{item.like_count + (isLiked ? 1 : 0)} likes</Text>
-          <Text style={s.statTxt}>{item.comment_count} comments</Text>
+
+        <Text style={styles.postContent}>{item.content}</Text>
+
+        {item.media_url && (
+          <Image
+            source={{ uri: item.media_url }}
+            style={styles.postImage}
+            defaultSource={{ uri: 'https://via.placeholder.com/300x200' }}
+          />
+        )}
+
+        <View style={styles.stats}>
+          <Text style={styles.statText}>{item.comment_count || 0} Comments</Text>
+          <Text style={styles.statText}>{item.like_count || 0} Reactions</Text>
         </View>
-        <View style={s.divider} />
-        <View style={s.actions}>
-          <TouchableOpacity style={s.actBtn} onPress={() => setLiked(p => toggle(p, item.id))}>
-            <Heart size={20} color={isLiked ? '#DC2626' : theme.colors.gray500} fill={isLiked ? '#DC2626' : 'none'} />
+
+        <View style={styles.divider} />
+
+        <View style={styles.actions}>
+          <TouchableOpacity
+            style={styles.actionButton}
+            onPress={() => setShowReactionPicker(showReactionPicker === item.id ? null : item.id)}
+          >
+            <Heart
+              size={20}
+              color={userReaction ? '#DC2626' : theme.colors.gray500}
+              fill={userReaction ? '#DC2626' : 'none'}
+            />
+            <Text style={styles.actionText}>React</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={s.actBtn}><MessageCircle size={20} color={theme.colors.gray500} /></TouchableOpacity>
-          <TouchableOpacity style={s.actBtn}><Share2 size={20} color={theme.colors.gray500} /></TouchableOpacity>
-          <View style={s.spacer} />
-          <TouchableOpacity style={s.actBtn} onPress={() => setSaved(p => toggle(p, item.id))}>
-            <Bookmark size={20} color={isSaved ? theme.colors.brandGreen : theme.colors.gray500} fill={isSaved ? theme.colors.brandGreen : 'none'} />
+
+          <TouchableOpacity style={styles.actionButton}>
+            <MessageCircle size={20} color={theme.colors.gray500} />
+            <Text style={styles.actionText}>Comment</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.actionButton}>
+            <Share2 size={20} color={theme.colors.gray500} />
+            <Text style={styles.actionText}>Share</Text>
+          </TouchableOpacity>
+
+          <View style={styles.spacer} />
+
+          <TouchableOpacity style={styles.actionButton}>
+            <Bookmark size={20} color={theme.colors.gray500} />
+            <Text style={styles.actionText}>Save</Text>
           </TouchableOpacity>
         </View>
+
+        {showReactionPicker === item.id && (
+          <View style={styles.reactionPicker}>
+            {REACTION_EMOJIS.map(emoji => (
+              <TouchableOpacity
+                key={emoji}
+                style={styles.reactionButton}
+                onPress={() => handleReact(item.id, emoji)}
+              >
+                <Text style={styles.reactionEmoji}>{emoji}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
       </View>
     );
   };
 
-  const Header = () => (
+  const renderStoriesHeader = () => (
     <View>
-      <FlatList data={stories} renderItem={renderStory} keyExtractor={i => i.id} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.stories} />
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.tabs}>
-        {FEED_TABS.map(t => (
-          <TouchableOpacity key={t} style={[s.chip, activeTab === t && s.chipOn]} onPress={() => setActiveTab(t)}>
-            <Text style={[s.chipTxt, activeTab === t && s.chipTxtOn]}>{t}</Text>
+      {stories.length > 0 && (
+        <View>
+          <View style={styles.storiesHeader}>
+            <Flame size={16} color={theme.colors.brandGreen} />
+            <Text style={styles.storiesTitle}>Stories</Text>
+          </View>
+          <FlatList
+            data={stories}
+            renderItem={renderStory}
+            keyExtractor={item => item.id}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.storiesContainer}
+            scrollEnabled
+          />
+          <View style={styles.divider} />
+        </View>
+      )}
+
+      <View style={styles.tabsContainer}>
+        {FEED_TABS.map(tab => (
+          <TouchableOpacity
+            key={tab}
+            style={[styles.tab, activeTab === tab && styles.tabActive]}
+            onPress={() => setActiveTab(tab)}
+          >
+            <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>
+              {tab}
+            </Text>
+            {activeTab === tab && <View style={styles.tabIndicator} />}
           </TouchableOpacity>
         ))}
-      </ScrollView>
+      </View>
     </View>
   );
 
-  return (
-    <View style={s.container}>
-      <SafeAreaView edges={['top']} style={s.flex}>
-        <View style={s.header}><Text style={s.title}>Social</Text></View>
-        <FlatList data={posts} renderItem={renderPost} keyExtractor={p => p.id} ListHeaderComponent={Header} ListEmptyComponent={!loading && posts.length === 0 ? <View style={{ alignItems: 'center', paddingTop: 60 }}><Text style={{ fontSize: 16, fontWeight: '600', color: theme.colors.gray500 }}>No posts yet</Text></View> : null} contentContainerStyle={s.feed} showsVerticalScrollIndicator={false} refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => { setRefreshing(true); loadData().then(() => setRefreshing(false)); }} tintColor={theme.colors.brandGreen} />} />
-        <TouchableOpacity style={s.fab} activeOpacity={0.85} onPress={() => setShowModal(true)}><Plus size={28} color="#fff" /></TouchableOpacity>
+  if (loading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Social</Text>
+        </View>
+        <View style={styles.centerContent}>
+          <ActivityIndicator size="large" color={theme.colors.brandGreen} />
+        </View>
       </SafeAreaView>
+    );
+  }
+
+  return (
+    <View style={styles.container}>
+      <SafeAreaView edges={['top']} style={styles.flex}>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Social</Text>
+        </View>
+
+        <FlatList
+          data={posts}
+          renderItem={renderPost}
+          keyExtractor={item => item.id}
+          ListHeaderComponent={renderStoriesHeader}
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <Smile size={48} color={theme.colors.gray300} />
+              <Text style={styles.emptyTitle}>No posts yet</Text>
+              <Text style={styles.emptyText}>
+                Be the first to share something with your church community!
+              </Text>
+            </View>
+          }
+          contentContainerStyle={styles.feedContainer}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor={theme.colors.brandGreen}
+            />
+          }
+          scrollEnabled
+        />
+
+        <TouchableOpacity
+          style={styles.fab}
+          activeOpacity={0.8}
+          onPress={() => setShowModal(true)}
+        >
+          <Plus size={28} color="#fff" />
+        </TouchableOpacity>
+      </SafeAreaView>
+
       <Modal visible={showModal} animationType="slide" transparent>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={s.overlay}>
-          <View style={s.modal}>
-            <View style={s.modalHead}>
-              <TouchableOpacity onPress={() => setShowModal(false)}><X size={24} color={theme.colors.text.primary} /></TouchableOpacity>
-              <Text style={s.modalTitle}>Create Post</Text>
-              <TouchableOpacity style={[s.submitBtn, !content.trim() && s.submitOff]} disabled={!content.trim()} onPress={submit}>
-                <Send size={16} color="#fff" /><Text style={s.submitTxt}>Post</Text>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.overlay}
+        >
+          <SafeAreaView style={styles.modalContainer}>
+            <View style={styles.modalHeader}>
+              <TouchableOpacity
+                onPress={() => {
+                  setShowModal(false);
+                  setContent('');
+                }}
+              >
+                <X size={24} color={theme.colors.text.primary} />
+              </TouchableOpacity>
+              <Text style={styles.modalTitle}>Create Post</Text>
+              <TouchableOpacity
+                style={[
+                  styles.postButton,
+                  (!content.trim() || submitting) && styles.postButtonDisabled,
+                ]}
+                disabled={!content.trim() || submitting}
+                onPress={handleCreatePost}
+              >
+                {submitting ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <Send size={16} color="#fff" />
+                    <Text style={styles.postButtonText}>Post</Text>
+                  </>
+                )}
               </TouchableOpacity>
             </View>
-            <Text style={s.label}>Post Type</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.typeScroll}>
-              {POST_TYPES.map(pt => {
-                const I = pt.icon; const on = postType === pt.key;
-                return (<TouchableOpacity key={pt.key} style={[s.typeOpt, on && s.typeOn]} onPress={() => setPostType(pt.key)}><I size={16} color={on ? '#fff' : theme.colors.gray600} /><Text style={[s.typeOptTxt, on && s.typeOnTxt]}>{pt.label}</Text></TouchableOpacity>);
-              })}
+
+            <ScrollView style={styles.modalContent} showsVerticalScrollIndicator={false}>
+              <Text style={styles.label}>What's on your heart?</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Share your thoughts, encouragement, or prayers..."
+                placeholderTextColor={theme.colors.gray400}
+                multiline
+                maxLength={500}
+                value={content}
+                onChangeText={setContent}
+                autoFocus
+              />
+
+              <Text style={styles.characterCount}>
+                {content.length}/500
+              </Text>
+
+              <Text style={styles.label} style={{ marginTop: 20 }}>
+                Post Type
+              </Text>
+              <ScrollView
+                horizontal
+                showsHorizontalScrollIndicator={false}
+                style={styles.typeContainer}
+              >
+                {POST_TYPES.map(type => {
+                  const Icon = type.icon;
+                  const isSelected = postType === type.key;
+                  return (
+                    <TouchableOpacity
+                      key={type.key}
+                      style={[
+                        styles.typeOption,
+                        isSelected && styles.typeOptionSelected,
+                      ]}
+                      onPress={() => setPostType(type.key)}
+                    >
+                      <Icon
+                        size={20}
+                        color={isSelected ? '#fff' : theme.colors.gray600}
+                      />
+                      <Text
+                        style={[
+                          styles.typeOptionText,
+                          isSelected && styles.typeOptionTextSelected,
+                        ]}
+                      >
+                        {type.label}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+
+              <View style={styles.infoBox}>
+                <Text style={styles.infoText}>
+                  💡 Posts are shared with your entire church community. Keep it respectful and uplifting!
+                </Text>
+              </View>
             </ScrollView>
-            <Text style={s.label}>Scope</Text>
-            <View style={s.scopeRow}>
-              {SCOPES.map(sc => (<TouchableOpacity key={sc} style={[s.scopeOpt, scope === sc && s.scopeOn]} onPress={() => setScope(sc)}><Text style={[s.scopeOptTxt, scope === sc && s.scopeOnTxt]}>{sc}</Text></TouchableOpacity>))}
-            </View>
-            <TextInput style={s.input} placeholder="Share what's on your heart..." placeholderTextColor={theme.colors.gray400} multiline value={content} onChangeText={setContent} autoFocus />
-          </View>
+          </SafeAreaView>
         </KeyboardAvoidingView>
       </Modal>
     </View>
   );
 }
 
-const c = theme.colors;
-const s = StyleSheet.create({
-  container: { flex: 1, backgroundColor: c.background.secondary },
-  flex: { flex: 1 },
-  header: { paddingHorizontal: 16, paddingVertical: 12 },
-  title: { fontSize: 28, fontWeight: '800', color: c.text.primary, letterSpacing: -0.5 },
-  stories: { paddingHorizontal: 12, paddingBottom: 12, gap: 12 },
-  storyItem: { alignItems: 'center', width: 76 },
-  storyCircle: { width: 70, height: 70, borderRadius: 35, backgroundColor: c.gray100, justifyContent: 'center', alignItems: 'center', borderWidth: 2, borderColor: c.gray200 },
-  storyNew: { borderWidth: 3, borderColor: c.brandGreen },
-  storyAdd: { borderStyle: 'dashed', borderColor: c.brandGreen, borderWidth: 2 },
-  storyInit: { fontSize: 22, fontWeight: '700', color: c.text.secondary },
-  storyName: { fontSize: 11, color: c.text.secondary, marginTop: 4, textAlign: 'center', fontWeight: '500' },
-  tabs: { paddingHorizontal: 12, paddingBottom: 12, gap: 8 },
-  chip: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: c.white, borderWidth: 1, borderColor: c.border.medium },
-  chipOn: { backgroundColor: c.brandGreen, borderColor: c.brandGreen },
-  chipTxt: { fontSize: 13, fontWeight: '600', color: c.text.secondary },
-  chipTxtOn: { color: c.white },
-  feed: { paddingBottom: 100 },
-  card: { backgroundColor: c.white, marginHorizontal: 12, marginBottom: 12, borderRadius: 16, padding: 16, ...theme.shadows.sm, borderWidth: 1, borderColor: c.border.light },
-  cardHead: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  avatar: { width: 42, height: 42, borderRadius: 21, backgroundColor: c.gray200, justifyContent: 'center', alignItems: 'center', marginRight: 10 },
-  avatarTxt: { fontSize: 15, fontWeight: '700', color: c.text.secondary },
-  authorInfo: { flex: 1 },
-  authorRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  authorName: { fontSize: 15, fontWeight: '700', color: c.text.primary },
-  scope: { backgroundColor: c.gray100, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 10 },
-  scopeTxt: { fontSize: 10, fontWeight: '600', color: c.text.tertiary },
-  time: { fontSize: 12, color: c.text.tertiary, marginTop: 1, fontWeight: '500' },
-  badge: { alignSelf: 'flex-start', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, marginBottom: 8 },
-  badgeTxt: { fontSize: 11, fontWeight: '700', textTransform: 'capitalize' },
-  body: { fontSize: 15, color: c.text.primary, lineHeight: 22, marginBottom: 8 },
-  scripture: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: '#F0FDFA', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 8, alignSelf: 'flex-start', marginBottom: 10 },
-  scriptureTxt: { fontSize: 12, fontWeight: '600', color: '#115E59' },
-  image: { width: '100%', height: 200, borderRadius: 12, marginBottom: 10 },
-  stats: { flexDirection: 'row', gap: 16, marginBottom: 8 },
-  statTxt: { fontSize: 12, color: c.text.tertiary, fontWeight: '500' },
-  divider: { height: 1, backgroundColor: c.border.light, marginBottom: 8 },
-  actions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  actBtn: { padding: 8, borderRadius: 20 },
-  spacer: { flex: 1 },
-  fab: { position: 'absolute', bottom: 24, right: 24, width: 56, height: 56, borderRadius: 28, backgroundColor: c.brandGreen, justifyContent: 'center', alignItems: 'center', ...theme.shadows.lg },
-  overlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  modal: { backgroundColor: c.white, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, minHeight: 420, ...theme.shadows.xl },
-  modalHead: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  modalTitle: { fontSize: 17, fontWeight: '700', color: c.text.primary },
-  submitBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: c.brandGreen, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
-  submitOff: { opacity: 0.4 },
-  submitTxt: { color: c.white, fontWeight: '700', fontSize: 14 },
-  label: { fontSize: 13, fontWeight: '600', color: c.text.secondary, marginBottom: 8 },
-  typeScroll: { marginBottom: 16 },
-  typeOpt: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: c.gray100, marginRight: 8 },
-  typeOn: { backgroundColor: c.brandGreen },
-  typeOptTxt: { fontSize: 13, fontWeight: '600', color: c.gray600 },
-  typeOnTxt: { color: c.white },
-  scopeRow: { flexDirection: 'row', gap: 8, marginBottom: 16 },
-  scopeOpt: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: c.gray100 },
-  scopeOn: { backgroundColor: c.brandGreen },
-  scopeOptTxt: { fontSize: 13, fontWeight: '600', color: c.gray600 },
-  scopeOnTxt: { color: c.white },
-  input: { fontSize: 16, color: c.text.primary, minHeight: 120, textAlignVertical: 'top', lineHeight: 24, borderTopWidth: 1, borderTopColor: c.border.light, paddingTop: 12 },
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  flex: {
+    flex: 1,
+  },
+  header: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.gray100,
+  },
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: theme.colors.text.primary,
+  },
+  centerContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  feedContainer: {
+    paddingBottom: 20,
+  },
+  storiesHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    marginBottom: 12,
+  },
+  storiesTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+    marginLeft: 6,
+  },
+  storiesContainer: {
+    paddingHorizontal: 12,
+    paddingBottom: 12,
+  },
+  storyItem: {
+    alignItems: 'center',
+    marginHorizontal: 4,
+  },
+  storyAvatar: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  storyInitials: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  storyName: {
+    fontSize: 12,
+    color: theme.colors.text.primary,
+    width: 56,
+    textAlign: 'center',
+  },
+  tabsContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+  tab: {
+    paddingBottom: 8,
+    marginRight: 24,
+    position: 'relative',
+  },
+  tabActive: {},
+  tabText: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: theme.colors.gray500,
+  },
+  tabTextActive: {
+    color: theme.colors.text.primary,
+    fontWeight: '600',
+  },
+  tabIndicator: {
+    height: 2,
+    backgroundColor: theme.colors.brandGreen,
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+  },
+  divider: {
+    height: 1,
+    backgroundColor: theme.colors.gray100,
+  },
+  post: {
+    backgroundColor: '#fff',
+    marginBottom: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.gray100,
+  },
+  postHeader: {
+    flexDirection: 'row',
+    marginBottom: 12,
+  },
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  avatarText: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  authorInfo: {
+    flex: 1,
+  },
+  authorRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  authorName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+    marginRight: 8,
+  },
+  typeBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  typeBadgeText: {
+    fontSize: 11,
+    fontWeight: '500',
+    textTransform: 'capitalize',
+  },
+  timestamp: {
+    fontSize: 12,
+    color: theme.colors.gray500,
+  },
+  postContent: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: theme.colors.text.primary,
+    marginBottom: 12,
+  },
+  postImage: {
+    width: '100%',
+    height: 200,
+    borderRadius: 8,
+    marginBottom: 12,
+    backgroundColor: theme.colors.gray100,
+  },
+  stats: {
+    flexDirection: 'row',
+    marginBottom: 8,
+  },
+  statText: {
+    fontSize: 12,
+    color: theme.colors.gray500,
+    marginRight: 16,
+  },
+  actions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingTop: 8,
+  },
+  actionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    marginRight: 12,
+  },
+  actionText: {
+    fontSize: 13,
+    color: theme.colors.gray600,
+    marginLeft: 4,
+  },
+  spacer: {
+    flex: 1,
+  },
+  reactionPicker: {
+    flexDirection: 'row',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: theme.colors.gray100,
+  },
+  reactionButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  reactionEmoji: {
+    fontSize: 24,
+  },
+  fab: {
+    position: 'absolute',
+    bottom: 20,
+    right: 20,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: theme.colors.brandGreen,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    paddingTop: 80,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+    marginTop: 12,
+  },
+  emptyText: {
+    fontSize: 14,
+    color: theme.colors.gray500,
+    marginTop: 6,
+    textAlign: 'center',
+    maxWidth: 280,
+  },
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: theme.colors.gray100,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+  },
+  postButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: theme.colors.brandGreen,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  postButtonDisabled: {
+    opacity: 0.5,
+  },
+  postButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+    marginLeft: 4,
+  },
+  modalContent: {
+    flex: 1,
+    padding: 16,
+  },
+  label: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: theme.colors.text.primary,
+    marginBottom: 8,
+  },
+  input: {
+    borderWidth: 1,
+    borderColor: theme.colors.gray200,
+    borderRadius: 8,
+    padding: 12,
+    fontSize: 14,
+    color: theme.colors.text.primary,
+    textAlignVertical: 'top',
+    minHeight: 120,
+  },
+  characterCount: {
+    fontSize: 12,
+    color: theme.colors.gray500,
+    marginTop: 4,
+    textAlign: 'right',
+  },
+  typeContainer: {
+    marginBottom: 16,
+  },
+  typeOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: theme.colors.gray200,
+    marginRight: 8,
+  },
+  typeOptionSelected: {
+    backgroundColor: theme.colors.brandGreen,
+    borderColor: theme.colors.brandGreen,
+  },
+  typeOptionText: {
+    fontSize: 13,
+    color: theme.colors.gray600,
+    marginLeft: 6,
+    fontWeight: '500',
+  },
+  typeOptionTextSelected: {
+    color: '#fff',
+  },
+  infoBox: {
+    backgroundColor: theme.colors.gray50,
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 16,
+    marginBottom: 40,
+  },
+  infoText: {
+    fontSize: 13,
+    color: theme.colors.gray600,
+    lineHeight: 18,
+  },
 });

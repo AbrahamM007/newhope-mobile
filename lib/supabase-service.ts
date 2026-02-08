@@ -19,13 +19,13 @@ export const supabaseService = {
       return data;
     },
 
-    create: async (content: string, postType = 'text', scope = 'PUBLIC_CHURCH') => {
+    create: async (content: string, postType = 'text', scope = 'PUBLIC_CHURCH', mediaUrl?: string) => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('Not authenticated');
 
       const { data: profile } = await supabase
         .from('profiles')
-        .select('id')
+        .select('id, first_name, last_name, avatar_url')
         .eq('auth_id', user.id)
         .maybeSingle();
 
@@ -38,8 +38,13 @@ export const supabaseService = {
           content,
           post_type: postType,
           scope,
+          media_url: mediaUrl,
+          is_approved: true,
         })
-        .select()
+        .select(`
+          *,
+          author:author_id(id, first_name, last_name, avatar_url)
+        `)
         .maybeSingle();
 
       if (error) throw error;
@@ -81,6 +86,104 @@ export const supabaseService = {
 
       if (error) throw error;
       return data;
+    },
+  },
+
+  stories: {
+    getActive: async () => {
+      const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+
+      const { data, error } = await supabase
+        .from('stories')
+        .select(`
+          *,
+          author:author_id(id, first_name, last_name, avatar_url)
+        `)
+        .gt('created_at', twentyFourHoursAgo)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      return data;
+    },
+
+    create: async (mediaUrl: string, caption?: string) => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('auth_id', user.id)
+        .maybeSingle();
+
+      if (!profile) throw new Error('Profile not found');
+
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+
+      const { data, error } = await supabase
+        .from('stories')
+        .insert({
+          author_id: profile.id,
+          media_url: mediaUrl,
+          caption,
+          expires_at: expiresAt,
+        })
+        .select(`
+          *,
+          author:author_id(id, first_name, last_name, avatar_url)
+        `)
+        .maybeSingle();
+
+      if (error) throw error;
+      return data;
+    },
+
+    reactToStory: async (storyId: string, emoji = '❤️') => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('auth_id', user.id)
+        .maybeSingle();
+
+      if (!profile) throw new Error('Profile not found');
+
+      const { data, error } = await supabase
+        .from('story_reactions')
+        .upsert({
+          story_id: storyId,
+          user_id: profile.id,
+          emoji,
+        }, {
+          onConflict: 'story_id,user_id'
+        });
+
+      if (error) throw error;
+      return data;
+    },
+
+    viewStory: async (storyId: string) => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) throw new Error('Not authenticated');
+
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('auth_id', user.id)
+        .maybeSingle();
+
+      if (!profile) throw new Error('Profile not found');
+
+      const { error } = await supabase
+        .from('story_views')
+        .insert({
+          story_id: storyId,
+          viewer_id: profile.id,
+        });
+
+      if (error && !error.message.includes('duplicate')) throw error;
     },
   },
 
