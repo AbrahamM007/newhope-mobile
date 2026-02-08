@@ -1,141 +1,145 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   View,
   Text,
-  TouchableOpacity,
-  TextInput,
-  FlatList,
-  ScrollView,
   StyleSheet,
-  SafeAreaView,
-  KeyboardAvoidingView,
-  Platform,
+  FlatList,
+  TouchableOpacity,
+  Image,
   ActivityIndicator,
+  SectionList,
+  SafeAreaView,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { ArrowLeft, Plus, Send, Users, User, UsersRound, Hand, SmilePlus } from 'lucide-react-native';
-import { messagesAPI } from '@/lib/api';
+import { MessageCircle, Search } from 'lucide-react-native';
+import { chatService, Conversation } from '@/lib/chat-service';
+import { useAuth } from '@/context/AuthContext';
 
-const brandGreen = '#15803d';
-const brandDark = '#1a1a1a';
-
-const TABS = ['All', 'Direct', 'Groups', 'Teams'];
-
-const getInitials = (name: string) => {
-  const parts = name.split(' ');
-  return parts.length > 1 ? `${parts[0][0]}${parts[1][0]}` : parts[0][0];
-};
-
-const TypeIcon = ({ type }: { type: string }) => {
-  if (type === 'group') return <Users size={14} color="#6b7280" />;
-  if (type === 'team') return <UsersRound size={14} color="#6b7280" />;
-  return <User size={14} color="#6b7280" />;
-};
+interface ConversationWithMeta extends Conversation {
+  unread_count?: number;
+  is_muted?: boolean;
+  badge: string;
+  section: 'DM' | 'GROUP' | 'SERVICE';
+}
 
 export default function MessagesScreen() {
   const router = useRouter();
-  const [activeTab, setActiveTab] = useState('All');
-  const [selectedChat, setSelectedChat] = useState<string | null>(null);
-  const [messageText, setMessageText] = useState('');
-  const [prayedMessages, setPrayedMessages] = useState<string[]>([]);
-  const [conversations, setConversations] = useState<any[]>([]);
-  const [messages, setMessages] = useState<any[]>([]);
+  const { user } = useAuth();
+  const [conversations, setConversations] = useState<ConversationWithMeta[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
 
-  const loadConversations = useCallback(async () => {
+  useEffect(() => {
+    if (user?.id) {
+      loadConversations();
+    }
+  }, [user?.id]);
+
+  const loadConversations = async () => {
     try {
-      const data = await messagesAPI.getConversations().catch(() => null);
-      if (data) setConversations(data);
-    } catch (_) {} finally { setLoading(false); }
-  }, []);
-  useEffect(() => { loadConversations(); }, [loadConversations]);
+      setLoading(true);
+      if (!user?.id) return;
 
-  const loadMessages = useCallback(async (userId: string) => {
-    try {
-      const data = await messagesAPI.getDMMessages(userId).catch(() => null);
-      if (data) setMessages(data);
-    } catch (_) {}
-  }, []);
+      const [dms, groups, services] = await Promise.all([
+        chatService.getDMConversations(user.id),
+        chatService.getGroupConversations(user.id),
+        chatService.getServiceConversations(user.id),
+      ]);
 
-  const filteredConversations = conversations.filter((c) => {
-    if (activeTab === 'All') return true;
-    if (activeTab === 'Direct') return c.type === 'dm';
-    if (activeTab === 'Groups') return c.type === 'group';
-    if (activeTab === 'Teams') return c.type === 'team';
-    return true;
-  });
+      const withMeta: ConversationWithMeta[] = [
+        ...dms.map((c: Conversation) => ({ ...c, section: 'DM' as const, badge: 'DM' })),
+        ...groups.map((c: Conversation) => ({
+          ...c,
+          section: 'GROUP' as const,
+          badge: c.type === 'GROUP' ? 'GROUP' : 'SMALL_GROUP',
+        })),
+        ...services.map((c: Conversation) => ({ ...c, section: 'SERVICE' as const, badge: 'SERVICE' })),
+      ];
 
-  const selectedConversation = conversations.find((c) => c.id === selectedChat);
-
-  const handlePrayed = (msgId: string) => {
-    setPrayedMessages((prev) =>
-      prev.includes(msgId) ? prev.filter((id) => id !== msgId) : [...prev, msgId]
-    );
+      setConversations(withMeta);
+    } catch (error) {
+      console.error('Error loading conversations:', error);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  if (selectedChat && selectedConversation) {
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await loadConversations();
+    setRefreshing(false);
+  };
+
+  const groupedData = [
+    {
+      title: 'Direct Messages',
+      data: conversations.filter(c => c.section === 'DM'),
+    },
+    {
+      title: 'Groups',
+      data: conversations.filter(c => c.section === 'GROUP'),
+    },
+    {
+      title: 'Upcoming Services',
+      data: conversations.filter(c => c.section === 'SERVICE'),
+    },
+  ].filter(section => section.data.length > 0);
+
+  const renderConversation = ({ item }: { item: ConversationWithMeta }) => (
+    <TouchableOpacity
+      style={styles.conversationItem}
+      onPress={() => router.push(`/chat/${item.id}`)}
+    >
+      <View style={styles.avatarContainer}>
+        {item.image_url ? (
+          <Image
+            source={{ uri: item.image_url }}
+            style={styles.avatar}
+          />
+        ) : (
+          <View style={[styles.avatar, styles.avatarPlaceholder]}>
+            <MessageCircle color="#fff" size={24} />
+          </View>
+        )}
+      </View>
+
+      <View style={styles.conversationContent}>
+        <View style={styles.titleRow}>
+          <Text style={styles.conversationTitle}>{item.title}</Text>
+          <View style={styles.badgeContainer}>
+            <Text style={styles.badge}>{item.badge}</Text>
+          </View>
+        </View>
+        {item.description && (
+          <Text style={styles.lastMessage} numberOfLines={1}>
+            {item.description}
+          </Text>
+        )}
+        <Text style={styles.timestamp}>
+          {item.last_message_at ? new Date(item.last_message_at).toLocaleDateString() : 'No messages'}
+        </Text>
+      </View>
+
+      {item.unread_count ? (
+        <View style={styles.unreadBadge}>
+          <Text style={styles.unreadText}>{item.unread_count}</Text>
+        </View>
+      ) : null}
+    </TouchableOpacity>
+  );
+
+  const renderSectionHeader = ({ section }: { section: { title: string } }) => (
+    <View style={styles.sectionHeader}>
+      <Text style={styles.sectionTitle}>{section.title}</Text>
+    </View>
+  );
+
+  if (loading) {
     return (
       <SafeAreaView style={styles.container}>
-        <View style={styles.chatHeader}>
-          <TouchableOpacity onPress={() => setSelectedChat(null)} style={styles.backBtn}>
-            <ArrowLeft size={24} color={brandDark} />
-          </TouchableOpacity>
-          <View style={styles.chatHeaderAvatar}>
-            <Text style={styles.chatHeaderInitials}>{getInitials(selectedConversation.name)}</Text>
-          </View>
-          <Text style={styles.chatHeaderName}>{selectedConversation.name}</Text>
+        <View style={styles.centerContent}>
+          <ActivityIndicator size="large" color="#0066cc" />
         </View>
-        <FlatList
-          data={messages}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.messagesList}
-          renderItem={({ item }) => (
-            <View style={[styles.messageBubbleRow, item.isMine ? styles.myRow : styles.theirRow]}>
-              <View style={[styles.messageBubble, item.isMine ? styles.myBubble : styles.theirBubble]}>
-                <Text style={[styles.messageText, item.isMine ? styles.myText : styles.theirText]}>
-                  {item.content}
-                </Text>
-                <Text style={[styles.messageTime, item.isMine ? styles.myTimeText : styles.theirTimeText]}>
-                  {item.time}
-                </Text>
-                {item.reactions.length > 0 && (
-                  <View style={styles.reactionsRow}>
-                    {item.reactions.map((r, i) => (
-                      <View key={i} style={styles.reactionChip}>
-                        <Text style={styles.reactionText}>{r}</Text>
-                      </View>
-                    ))}
-                  </View>
-                )}
-                {item.isPrayer && (
-                  <TouchableOpacity
-                    style={[styles.prayedBtn, prayedMessages.includes(item.id) && styles.prayedBtnActive]}
-                    onPress={() => handlePrayed(item.id)}
-                  >
-                    <Hand size={14} color={prayedMessages.includes(item.id) ? '#fff' : brandGreen} />
-                    <Text style={[styles.prayedBtnText, prayedMessages.includes(item.id) && styles.prayedBtnTextActive]}>
-                      I Prayed
-                    </Text>
-                  </TouchableOpacity>
-                )}
-              </View>
-            </View>
-          )}
-        />
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <View style={styles.inputBar}>
-            <TextInput
-              style={styles.textInput}
-              value={messageText}
-              onChangeText={setMessageText}
-              placeholder="Type a message..."
-              placeholderTextColor="#9ca3af"
-            />
-            <TouchableOpacity style={styles.sendBtn}>
-              <Send size={20} color="#fff" />
-            </TouchableOpacity>
-          </View>
-        </KeyboardAvoidingView>
       </SafeAreaView>
     );
   }
@@ -143,110 +147,153 @@ export default function MessagesScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backBtn}>
-          <ArrowLeft size={24} color={brandDark} />
-        </TouchableOpacity>
         <Text style={styles.headerTitle}>Messages</Text>
-        <TouchableOpacity style={styles.newMsgBtn}>
-          <Plus size={22} color={brandGreen} />
+        <TouchableOpacity onPress={() => router.push('/search')}>
+          <Search color="#0066cc" size={24} />
         </TouchableOpacity>
       </View>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsContainer} contentContainerStyle={styles.tabsContent}>
-        {TABS.map((tab) => (
-          <TouchableOpacity
-            key={tab}
-            style={[styles.tabChip, activeTab === tab && styles.tabChipActive]}
-            onPress={() => setActiveTab(tab)}
-          >
-            <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>{tab}</Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-      <FlatList
-        data={filteredConversations}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.listContent}
-        renderItem={({ item }) => (
-          <TouchableOpacity style={styles.conversationRow} onPress={() => { setSelectedChat(item.id); loadMessages(item.id); }}>
-            <View style={styles.avatarCircle}>
-              <Text style={styles.avatarText}>{getInitials(item.name)}</Text>
-            </View>
-            <View style={styles.conversationInfo}>
-              <View style={styles.conversationTop}>
-                <View style={styles.nameRow}>
-                  <Text style={styles.conversationName} numberOfLines={1}>{item.name}</Text>
-                  <TypeIcon type={item.type} />
-                </View>
-                <Text style={styles.timeText}>{item.time}</Text>
-              </View>
-              <View style={styles.conversationBottom}>
-                <Text style={styles.lastMessage} numberOfLines={1}>{item.lastMessage}</Text>
-                {item.unread > 0 && (
-                  <View style={styles.unreadBadge}>
-                    <Text style={styles.unreadText}>{item.unread}</Text>
-                  </View>
-                )}
-              </View>
-            </View>
-          </TouchableOpacity>
-        )}
-      />
+
+      {groupedData.length === 0 ? (
+        <View style={styles.centerContent}>
+          <MessageCircle color="#ccc" size={48} />
+          <Text style={styles.emptyText}>No conversations yet</Text>
+          <Text style={styles.emptySubtext}>Start a conversation to connect</Text>
+        </View>
+      ) : (
+        <SectionList
+          sections={groupedData}
+          keyExtractor={(item) => item.id}
+          renderItem={renderConversation}
+          renderSectionHeader={renderSectionHeader}
+          contentContainerStyle={styles.listContent}
+          onRefresh={handleRefresh}
+          refreshing={refreshing}
+        />
+      )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#fff' },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
-  backBtn: { padding: 4 },
-  headerTitle: { fontSize: 20, fontWeight: '700', color: brandDark },
-  newMsgBtn: { padding: 4 },
-  tabsContainer: { maxHeight: 52, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
-  tabsContent: { paddingHorizontal: 16, paddingVertical: 10, gap: 8 },
-  tabChip: { paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20, backgroundColor: '#f3f4f6', marginRight: 8 },
-  tabChipActive: { backgroundColor: brandGreen },
-  tabText: { fontSize: 14, fontWeight: '500', color: '#6b7280' },
-  tabTextActive: { color: '#fff' },
-  listContent: { paddingTop: 4 },
-  conversationRow: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f9fafb' },
-  avatarCircle: { width: 48, height: 48, borderRadius: 24, backgroundColor: brandGreen, alignItems: 'center', justifyContent: 'center', marginRight: 12 },
-  avatarText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  conversationInfo: { flex: 1 },
-  conversationTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
-  nameRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flex: 1, marginRight: 8 },
-  conversationName: { fontSize: 16, fontWeight: '600', color: brandDark, flexShrink: 1 },
-  timeText: { fontSize: 12, color: '#9ca3af' },
-  conversationBottom: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  lastMessage: { fontSize: 14, color: '#6b7280', flex: 1, marginRight: 8 },
-  unreadBadge: { backgroundColor: brandGreen, borderRadius: 10, minWidth: 20, height: 20, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6 },
-  unreadText: { color: '#fff', fontSize: 11, fontWeight: '700' },
-  chatHeader: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#f3f4f6' },
-  chatHeaderAvatar: { width: 36, height: 36, borderRadius: 18, backgroundColor: brandGreen, alignItems: 'center', justifyContent: 'center', marginRight: 10 },
-  chatHeaderInitials: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  chatHeaderName: { fontSize: 18, fontWeight: '600', color: brandDark },
-  messagesList: { padding: 16, paddingBottom: 8 },
-  messageBubbleRow: { marginBottom: 12 },
-  myRow: { alignItems: 'flex-end' },
-  theirRow: { alignItems: 'flex-start' },
-  messageBubble: { maxWidth: '80%', padding: 12, borderRadius: 16 },
-  myBubble: { backgroundColor: brandGreen, borderBottomRightRadius: 4 },
-  theirBubble: { backgroundColor: '#f3f4f6', borderBottomLeftRadius: 4 },
-  messageText: { fontSize: 15, lineHeight: 20 },
-  myText: { color: '#fff' },
-  theirText: { color: brandDark },
-  messageTime: { fontSize: 11, marginTop: 4 },
-  myTimeText: { color: 'rgba(255,255,255,0.7)', textAlign: 'right' },
-  theirTimeText: { color: '#9ca3af' },
-  reactionsRow: { flexDirection: 'row', marginTop: 6, gap: 4 },
-  reactionChip: { backgroundColor: 'rgba(0,0,0,0.08)', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2 },
-  reactionText: { fontSize: 12 },
-  prayedBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 8, paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: brandGreen, alignSelf: 'flex-start' },
-  prayedBtnActive: { backgroundColor: brandGreen, borderColor: brandGreen },
-  prayedBtnText: { fontSize: 12, fontWeight: '600', color: brandGreen },
-  prayedBtnTextActive: { color: '#fff' },
-  typingIndicator: { paddingHorizontal: 20, paddingVertical: 4 },
-  typingText: { fontSize: 12, color: '#9ca3af', fontStyle: 'italic' },
-  inputBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 10, borderTopWidth: 1, borderTopColor: '#f3f4f6', gap: 10 },
-  textInput: { flex: 1, backgroundColor: '#f3f4f6', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, fontSize: 15, color: brandDark },
-  sendBtn: { width: 40, height: 40, borderRadius: 20, backgroundColor: brandGreen, alignItems: 'center', justifyContent: 'center' },
+  container: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  headerTitle: {
+    fontSize: 28,
+    fontWeight: '700',
+    color: '#000',
+  },
+  centerContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+  },
+  emptyText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#000',
+    marginTop: 16,
+  },
+  emptySubtext: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 8,
+  },
+  listContent: {
+    paddingVertical: 8,
+  },
+  sectionHeader: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#f8f8f8',
+  },
+  sectionTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#666',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  conversationItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f0f0f0',
+  },
+  avatarContainer: {
+    marginRight: 12,
+  },
+  avatar: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+  },
+  avatarPlaceholder: {
+    backgroundColor: '#0066cc',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  conversationContent: {
+    flex: 1,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  conversationTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#000',
+    flex: 1,
+  },
+  badgeContainer: {
+    marginLeft: 8,
+  },
+  badge: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#fff',
+    backgroundColor: '#0066cc',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+  },
+  lastMessage: {
+    fontSize: 13,
+    color: '#666',
+    marginBottom: 4,
+  },
+  timestamp: {
+    fontSize: 12,
+    color: '#999',
+  },
+  unreadBadge: {
+    backgroundColor: '#ff3b30',
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginLeft: 8,
+  },
+  unreadText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
 });
