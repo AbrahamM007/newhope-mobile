@@ -169,7 +169,7 @@ export default function HomeScreen() {
                 <Text style={s.seeAll}>See All</Text>
               </TouchableOpacity>
             </View>
-            {announcements.map((a) => (
+            {Array.isArray(announcements) && announcements.map((a) => (
               <View key={a.id} style={s.announcementCard}>
                 <View style={[s.annDot, { backgroundColor: CATEGORY_COLORS[a.category] || theme.colors.brandGreen }]} />
                 <View style={s.annContent}>
